@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2b2f33">
+<title>C172 Smart – Performance Cessna 172</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header><div>
+  <h1>C172 <span>Smart</span></h1>
+  <p id="model_title">Cessna 172S Skyhawk · Lycoming IO-360-L2A 180 hp</p>
+</div></header>
+
+<nav id="tabs">
+  <button data-tab="wb" class="active">Peso y balance</button>
+  <button data-tab="perf">Performance</button>
+  <button data-tab="fuel">Combustible</button>
+  <button data-tab="speeds">Velocidades</button>
+  <button data-tab="model">Avión</button>
+</nav>
+
+<main>
+<div class="units">
+  <label>Peso<select id="u_w"><option value="lb">lb</option><option value="kg">kg</option></select></label>
+  <label>Combustible<select id="u_f"><option value="gal">galones US</option><option value="L">litros</option></select></label>
+</div>
+<!-- ============ PESO Y BALANCE ============ -->
+<section id="wb" class="tab active">
+  <div class="card">
+    <h2>Carga</h2>
+    <table class="grid">
+      <thead><tr><th>Estación</th><th>Peso (<span class="uw">lb</span>)</th><th>Brazo (in)</th><th>Máx.</th></tr></thead>
+      <tbody>
+        <tr><td>Peso vacío (hoja W&amp;B de tu matrícula)</td><td><input id="w_empty" type="number" value="1663"></td><td><input id="a_empty" type="number" step="0.01" value="40.0"></td><td></td></tr>
+        <tr><td>Asientos delanteros</td><td><input id="w_front" type="number" value="340"></td><td id="d_front"></td><td></td></tr>
+        <tr><td>Asientos traseros</td><td><input id="w_rear" type="number" value="0"></td><td id="d_rear"></td><td></td></tr>
+        <tr><td>Equipaje zona A</td><td><input id="w_bagA" type="number" value="0"></td><td id="d_bagA"></td><td id="m_bagA"></td></tr>
+        <tr><td>Equipaje zona B</td><td><input id="w_bagB" type="number" value="0"></td><td id="d_bagB"></td><td id="m_bagB"></td></tr>
+        <tr><td>Combustible (<span class="uf">gal</span>)</td><td><input id="f_gal" type="number" value="40"></td><td id="d_fuel"></td><td id="m_fuel"></td></tr>
+      </tbody>
+    </table>
+    <p class="hint">Brazos, límites y envolvente se editan en la pestaña <b>Avión</b>. Se descuenta el combustible de rodaje/arranque (pestaña Combustible).</p>
+  </div>
+
+  <div class="card">
+    <h2>Resultado</h2>
+    <table class="grid res">
+      <thead><tr><th></th><th>Peso (<span class="uw">lb</span>)</th><th>CG (in)</th><th>Estado</th></tr></thead>
+      <tbody id="wb_res"></tbody>
+    </table>
+    <div id="wb_msgs"></div>
+    <svg id="chart" class="fig" viewBox="0 0 420 340" role="img" aria-label="Envolvente de centro de gravedad"></svg>
+  </div>
+</section>
+
+<!-- ============ PERFORMANCE ============ -->
+<section id="perf" class="tab">
+  <div class="card">
+    <h2>Atmósfera, pista y viento</h2>
+    <div class="form">
+      <label>Elevación aeródromo (ft)<input id="elev" type="number" value="0"></label>
+      <label>QNH (hPa)<input id="qnh" type="number" step="1" value="1013"></label>
+      <label>Temperatura (°C)<input id="oat" type="number" value="15"></label>
+      <label>Pista (ej. 27)<input id="rwy" type="number" min="1" max="36" value="27"></label>
+      <label>Viento dirección (°)<input id="wdir" type="number" min="0" max="360" value="270"></label>
+      <label>Viento velocidad (kt)<input id="wspd" type="number" min="0" value="0"></label>
+    </div>
+    <div id="atm_out" class="kpis"></div>
+  </div>
+
+  <div class="card">
+    <h2>Despegue <small>flaps 10°, gas a fondo, mezcla pobre</small></h2>
+    <div class="form">
+      <label>Peso (<span class="uw">lb</span>)<span class="row"><input id="to_w" type="number" value="2400"><button class="mini" data-copy="to">← W&amp;B</button></span></label>
+      <label>Superficie
+        <select id="to_surf">
+          <option value="1">Asfalto seco</option>
+          <option value="1.15">Asfalto mojado</option>
+          <option value="1.15">Hierba corta seca</option>
+          <option value="1.3">Hierba mojada</option>
+        </select></label>
+      <label>Pista disponible (ft)<input id="to_len" type="number" value="3000"></label>
+    </div>
+    <div id="to_out" class="kpis"></div>
+    <svg id="to_fig" class="fig" viewBox="0 0 480 190" role="img" aria-label="Pista y recorrido de despegue"></svg>
+  </div>
+
+  <div class="card">
+    <h2>Aterrizaje <small>flaps 30°, motor al ralentí, frenado máx.</small></h2>
+    <div class="form">
+      <label>Peso (<span class="uw">lb</span>)<input id="ld_w" type="number" value="2200"></label>
+      <label>Superficie
+        <select id="ld_surf">
+          <option value="1">Asfalto seco</option>
+          <option value="1.3">Asfalto mojado</option>
+          <option value="1.45">Hierba corta seca</option>
+          <option value="1.6">Hierba mojada</option>
+        </select></label>
+      <label>Pista disponible (ft)<input id="ld_len" type="number" value="3000"></label>
+    </div>
+    <div id="ld_out" class="kpis"></div>
+    <svg id="ld_fig" class="fig" viewBox="0 0 480 190" role="img" aria-label="Pista y recorrido de aterrizaje"></svg>
+  </div>
+  <p class="hint">Estimaciones interpoladas a partir de las tablas de la pestaña Avión, corregidas por peso, viento y superficie. El margen del 25 % es una práctica recomendada, no un valor del POH. Cruce sobre el umbral a 50 ft.</p>
+</section>
+
+<!-- ============ COMBUSTIBLE ============ -->
+<section id="fuel" class="tab">
+  <div class="card">
+    <h2>Planificador de ruta</h2>
+    <div class="form">
+      <label>Distancia (NM)<input id="r_dist" type="number" value="120"></label>
+      <label>TAS crucero (kt)<input id="r_tas" type="number" value="105"></label>
+      <label>Viento de frente (+) / cola (−) (kt)<input id="r_wind" type="number" value="0"></label>
+      <label>Consumo crucero (<span class="uf">gal</span>/h)<input id="r_burn" type="number" step="0.1" value="8.5"></label>
+      <label>Rodaje + despegue (<span class="uf">gal</span>)<input id="r_taxi" type="number" step="0.1" value="1.4"></label>
+      <label>Ascenso extra (<span class="uf">gal</span>)<input id="r_climb" type="number" step="0.1" value="1.5"></label>
+      <label>Reserva
+        <select id="r_res">
+          <option value="30">30 min (VFR día)</option>
+          <option value="45">45 min (VFR noche)</option>
+          <option value="60">60 min (prudente)</option>
+        </select></label>
+    </div>
+    <div id="fuel_out" class="kpis"></div>
+    <button id="fuel_apply" class="primary">Usar este combustible en Peso y balance</button>
+  </div>
+  <p class="hint">Ajusta consumo y TAS a tu avión y tu técnica de crucero.</p>
+</section>
+
+<!-- ============ VELOCIDADES ============ -->
+<section id="speeds" class="tab">
+  <div class="card">
+    <h2>Velocidades V (KIAS) <small>editables</small></h2>
+    <table class="grid">
+      <tbody>
+        <tr><td>V<sub>R</sub> rotación</td><td><input id="v_vr" value="55"></td></tr>
+        <tr><td>V<sub>X</sub> mejor ángulo de ascenso</td><td><input id="v_vx" value="60"></td></tr>
+        <tr><td>V<sub>Y</sub> mejor régimen de ascenso</td><td><input id="v_vy" value="74"></td></tr>
+        <tr><td>Planeo máximo (flaps arriba)</td><td><input id="v_glide" value="68"></td></tr>
+        <tr><td>Aproximación final (flaps 30°)</td><td><input id="v_app" value="60–65"></td></tr>
+        <tr><td>V<sub>FE</sub> máx. flaps extendidos</td><td><input id="v_vfe" value="110"></td></tr>
+        <tr><td>V<sub>A</sub> maniobra (peso máx.)</td><td><input id="v_va1" value="99"></td></tr>
+        <tr><td>V<sub>A</sub> maniobra (peso reducido)</td><td><input id="v_va2" value="90"></td></tr>
+        <tr><td>V<sub>NO</sub> crucero estructural máx.</td><td><input id="v_vno" value="129"></td></tr>
+        <tr><td>V<sub>NE</sub> nunca exceder</td><td><input id="v_vne" value="163"></td></tr>
+        <tr><td>V<sub>S1</sub> pérdida limpio</td><td><input id="v_vs1" value="48"></td></tr>
+        <tr><td>V<sub>S0</sub> pérdida con flaps</td><td><input id="v_vs0" value="40"></td></tr>
+        <tr><td>Viento cruzado demostrado (kt)</td><td><input id="m_xw" type="number" value="15"></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ AVIÓN ============ -->
+<section id="model" class="tab">
+  <div class="card">
+    <h2>Modelo</h2>
+    <div class="form">
+      <label>Nombre mostrado<input id="m_name" type="text" value="Cessna 172S Skyhawk · Lycoming IO-360-L2A 180 hp"></label>
+    </div>
+    <p class="hint">Valores por defecto: 172S. Para un 172R, N, M, etc., copia los datos de <b>tu POH/AFM</b> y la hoja de peso y balance de la matrícula.</p>
+
+    <p class="sub">Pesos y combustible</p>
+    <div class="form">
+      <label>MTOW (<span class="uw">lb</span>)<input id="m_mtow" type="number" value="2550"></label>
+      <label>Peso máx. en rampa (<span class="uw">lb</span>)<input id="m_ramp" type="number" value="2558"></label>
+      <label>Combustible utilizable (<span class="uf">gal</span>)<input id="m_fuelmax" type="number" value="53"></label>
+      <label>Peso del combustible (lb/gal)<input id="m_lbgal" type="number" step="0.1" value="6"></label>
+    </div>
+
+    <p class="sub">Brazos de las estaciones (in)</p>
+    <div class="form">
+      <label>Asientos delanteros<input id="m_arm_front" type="number" step="0.1" value="37"></label>
+      <label>Asientos traseros<input id="m_arm_rear" type="number" step="0.1" value="73"></label>
+      <label>Equipaje A<input id="m_arm_bagA" type="number" step="0.1" value="95"></label>
+      <label>Equipaje B<input id="m_arm_bagB" type="number" step="0.1" value="123"></label>
+      <label>Combustible<input id="m_arm_fuel" type="number" step="0.1" value="48"></label>
+    </div>
+
+    <p class="sub">Límites de equipaje (<span class="uw">lb</span>)</p>
+    <div class="form">
+      <label>Zona A máx.<input id="m_bagAmax" type="number" value="120"></label>
+      <label>Zona B máx.<input id="m_bagBmax" type="number" value="50"></label>
+      <label>Total máx.<input id="m_bagTot" type="number" value="120"></label>
+    </div>
+
+    <p class="sub">Envolvente de CG</p>
+    <div class="form">
+      <label>Límite delantero hasta (<span class="uw">lb</span>)<input id="m_fwdKnee" type="number" value="1950"></label>
+      <label>Brazo delantero a ese peso (in)<input id="m_fwdMin" type="number" step="0.1" value="35"></label>
+      <label>Brazo delantero al MTOW (in)<input id="m_fwdMax" type="number" step="0.1" value="41"></label>
+      <label>Límite trasero (in)<input id="m_aft" type="number" step="0.1" value="47.3"></label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Tablas de performance</h2>
+    <div class="form">
+      <label>Peso de referencia de las tablas (<span class="uw">lb</span>)<input id="m_refw" type="number" value="2550"></label>
+    </div>
+    <p class="sub">Despegue — una línea por fila: altitud densidad (ft), recorrido (ft), hasta 50 ft (ft)</p>
+    <textarea id="m_totab" spellcheck="false">0,860,1465
+2000,1010,1720
+4000,1190,2035
+6000,1410,2420
+8000,1700,2950</textarea>
+    <p class="sub">Aterrizaje — misma estructura</p>
+    <textarea id="m_ldtab" spellcheck="false">0,575,1335
+2000,610,1400
+4000,650,1485
+6000,695,1570
+8000,745,1665</textarea>
+    <p class="hint">Las tablas por defecto son aproximaciones del 172S. Sustitúyelas por las de tu POH para resultados fiables.</p>
+  </div>
+</section>
+</main>
+
+<footer>
+  ⚠️ Herramienta de apoyo a la planificación, <b>no sustituye al POH/AFM de tu avión</b> ni al criterio del piloto al mando.
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
