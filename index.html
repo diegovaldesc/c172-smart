@@ -59,6 +59,26 @@
 
 <!-- ============ PERFORMANCE ============ -->
 <section id="perf" class="tab">
+  <div class="card" id="ad_card">
+    <h2>Aeródromo <small>Chile · AIP</small></h2>
+    <label>Buscar por código OACI, nombre o ciudad
+      <input id="ad_q" type="search" placeholder="Ej. SCEL, Chicureo, Pichilemu" autocomplete="off" autocapitalize="off" spellcheck="false">
+    </label>
+    <input id="ad_sel" type="hidden" value="">
+    <div id="ad_list" class="adlist" role="listbox" aria-label="Resultados"></div>
+    <div id="ad_info" hidden>
+      <div class="form">
+        <label>Pista a usar
+          <select id="ad_rwy"></select>
+        </label>
+      </div>
+      <p class="hint" id="ad_apply"></p>
+      <dl id="ad_data" class="addata"></dl>
+      <div id="ad_warn"></div>
+    </div>
+    <p class="hint" id="ad_status">Cargando base de datos…</p>
+  </div>
+
   <div class="card">
     <h2>Atmósfera, pista y viento</h2>
     <div class="form">
@@ -225,5 +245,6 @@
 </footer>
 
 <script src="app.js"></script>
+<script src="aerodromos.js"></script>
 </body>
 </html>

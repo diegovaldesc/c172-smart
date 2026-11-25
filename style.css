@@ -43,3 +43,13 @@ footer{max-width:760px;margin:16px auto;padding:0 16px 24px;color:var(--mut);fon
 .sub{margin:16px 0 6px;font-size:13px;color:var(--ink);font-weight:700}
 .units{display:flex;gap:10px;margin:12px 0 0}
 .units label{flex:1}
+.adlist{display:flex;flex-direction:column;margin-top:6px}
+.adlist button{text-align:left;background:var(--field);border:1px solid var(--line);border-top:0;padding:9px 10px;cursor:pointer;font-size:14px;color:var(--txt);display:flex;gap:10px;align-items:baseline}
+.adlist button:first-child{border-top:1px solid var(--line)}
+.adlist button:hover,.adlist button:focus{background:#efe6d3;outline:none}
+.adlist b{min-width:3.2em;color:var(--accd);letter-spacing:.5px}
+.adlist span{color:var(--mut);font-size:12px;margin-left:auto;text-align:right}
+.addata{display:grid;grid-template-columns:minmax(90px,max-content) 1fr;gap:4px 12px;margin:10px 0 0;font-size:13px}
+.addata dt{color:var(--mut);font-weight:600}
+.addata dd{margin:0;overflow-wrap:anywhere}
+#ad_info{margin-top:12px}
