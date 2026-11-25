@@ -80,7 +80,7 @@ const FIELDS = 'input[id],select[id],textarea[id]';
 function save() {
   const o = {};
   document.querySelectorAll(FIELDS).forEach(e => o[e.id] = e.value);
-  localStorage.setItem(KEY, JSON.stringify(o));
+  try { localStorage.setItem(KEY, JSON.stringify(o)); } catch (e) { /* sin almacenamiento */ }
 }
 function load() {
   try {
@@ -339,4 +339,3 @@ $('fuel_apply').addEventListener('click', () => {
 load();
 curW = uw(); curF = uf();
 recalc();
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js');
