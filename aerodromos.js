@@ -9,6 +9,7 @@
   let DB = [], META = {};
 
   const HOURS = { HJ: 'HJ (de la salida a la puesta del sol)', H24: 'H24 (continuo)' };
+  const USO = { PUB: 'Público', PVT: 'Privado (requiere autorización del administrador)', MIL: 'Militar (requiere autorización)', 'PUB/MIL': 'Público y militar' };
   // Pavimentada solo si no aparece también tierra, pasto, ripio, etc. (superficie mixta = se trata como sin pavimentar, lado conservador)
   const hasPaved = s => /(ASPH|asfalt|CONC|hormig|pavim)/i.test(s || '') && !/(tierra|pasto|ripio|maicillo|grava|arena|c[eé]sped|compact|natural)/i.test(s || '');
 
@@ -216,6 +217,26 @@
     else applyPanel(p);
   }
 
+  // ENR 4.1: servicios y frecuencias, agrupados por servicio
+  const SVN = { TWR: 'Torre (TWR)', GND: 'Control terrestre (GND)', APP: 'Aproximación (APP)', RDR: 'Radar', ACC: 'Control de área (ACC)', AFIS: 'AFIS (información)', ATIS: 'ATIS', FSS: 'FSS', TIBA: 'TIBA (radiodifusión de tránsito)', DLVRY: 'Autorizaciones (DLVRY)', 'G/A/G': 'Aire-tierra (G/A/G)' };
+  const FNOTE = { PRI: 'principal', SCDRY: 'secundaria', EMERG: 'emergencia', ALTN: 'alterna' };
+  function freqText(a) {
+    if (!a.fq || !a.fq.length) return '';
+    const g = new Map();
+    a.fq.forEach(([s, f, n]) => {
+      if (!g.has(s)) g.set(s, []);
+      g.get(s).push(f + (n ? ' (' + (FNOTE[n.toUpperCase()] || n) + ')' : ''));
+    });
+    return [...g].map(([s, fs]) => `${SVN[s] || s}: ${fs.join(' · ')} MHz`).join('\n');
+  }
+  function atzText(a) {
+    const z = a.atz;
+    if (!z) return '';
+    const r = nf(z.nm, z.nm % 1 ? 1 : 0);
+    const alt = z.top ? ', desde el suelo hasta ' + z.top : '';
+    return z.parcial ? `Forma parcial (semicírculo o con corte) de ${r} NM de radio${alt}. Lee la geometría exacta en las notas del AIP.` : `Radio ${r} NM${alt}`;
+  }
+
   function renderData(p, a) {
     const dl = el(p + '_data');
     dl.replaceChildren();
@@ -229,15 +250,27 @@
     if (a.pc) row('Resistencia', /kg/i.test(a.pc) ? `Peso máx. de aeronave ${a.pc}` : a.pc);
     if (a.lg) row('Iluminación', a.lg === 'NIL' ? 'Sin iluminación (NIL)' : a.lg);
     row('Servicios', a.sv);
+    row('Frecuencias', freqText(a));
+    row('Radioayudas', (a.nv || []).map(n => `${n[0]}${n[1] ? ' ' + n[1] : ''} · ${n[2]} MHz`).join('\n'));
+    row('Zona de tránsito (ATZ)', atzText(a));
     row('Horario', a.hr ? (HOURS[a.hr] || a.hr) : '');
+    row('Uso', USO[a.uso] || '');
+    row('Cómo llegar', a.loc);
+    row('Observaciones del AIP', a.ob);
+    row('Notas ENR 4.1 (horarios, ATZ/CTR)', a.nt);
     row('Fuente', `AIP Chile Vol. I · ${a.src === 'AD 2' ? 'AD 2' : 'AD 3'} · vigencia ${META.vigencia || ''}`);
     dl.querySelectorAll('dd').forEach(d => { d.style.whiteSpace = 'pre-line'; });
 
     const w = el(p + '_warn');
     w.replaceChildren();
     const msg = (t, c) => w.append(make('div', t, 'msg ' + c));
+    (a.fix || []).forEach(t => msg(t, 'warn'));
+    if (a.ap) msg('El AIP marca estas coordenadas como aproximadas (*).', 'warn');
+    if (a.uso === 'PVT') msg('Aeródromo privado: pide autorización al administrador antes de operar.', 'warn');
+    if (a.uso === 'MIL') msg('Aeródromo militar: requiere autorización de la unidad.', 'warn');
     if (!a.q) msg('Registro con campos incompletos o dudosos en la extracción automática. Verifica en el AIP antes de usarlo.', 'warn');
-    if (a.src === 'AD 2') msg('Aeropuerto con ficha AD 2: frecuencias, distancias declaradas y pistas múltiples, consúltalas en el AIP.', 'warn');
+    if (a.src === 'AD 2') msg('Aeropuerto con ficha AD 2: distancias declaradas, ATZ/CTR y procedimientos, consúltalos en el AIP.', 'warn');
+    if (!a.fq) msg('No figura en ENR 4.1 (sin torre, AFIS ni frecuencia TIBA publicados). Revisa las observaciones del AIP y la frecuencia de la zona antes de operar.', 'warn');
     msg('El largo cargado es el largo físico de la pista. Para el cálculo usa las distancias declaradas (TORA/LDA) del AIP si son menores.', 'warn');
   }
 

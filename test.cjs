@@ -294,7 +294,27 @@ const AD=JSON.parse(fs.readFileSync(__dirname+'/data/aerodromos.json','utf8'));
   // el vuelo del bug: SCTB tenía la latitud en blanco y el planificador seguía con 120 NM
   assert(g('SCTB').lat<-33.4&&g('SCTB').lat>-33.5,'SCTB tiene latitud');
   const gc=(a,b)=>{const r=Math.PI/180,h=Math.sin((b.lat-a.lat)*r/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin((b.lon-a.lon)*r/2)**2;return 2*3440.065*Math.asin(Math.sqrt(h));};
+  // base completa: todos los códigos del índice AD 3.0 del AIP (antes faltaban 43)
+  for(const c of ['SCUE','SCSN','SCEI','SCAB','SCCY','SCVC','SCEY','SCGH'])assert(g(c),'aeródromo '+c+' está en la base');
+  assert(AD.ad.length>=305,'base con todos los aeródromos del AIP (AD 2 + AD 3): '+AD.ad.length);
+  for(const a of AD.ad){assert(Number.isFinite(a.el),a.i+' tiene elevación');assert(a.rw.length&&a.rw.every(r=>r.l>100&&r.w>3&&r.a),a.i+' pistas con designador, largo y ancho');assert(a.q===1||a.q===0);}
+  assert(g('SCEO').lon<-71&&g('SCEO').lon>-72,'SCEO: el PDF separaba el primer dígito de la longitud');
+  assert.equal(g('SCCI').rw.length,3,'Punta Arenas con sus 3 pistas');
+  assert(g('SCSK').fix&&g('SCSK').el>=1410,'elevación con m y ft inconsistentes en el AIP: se usa la mayor y se avisa');
   const nm=gc(g('SCTB'),g('SCVI'));assert(nm>330&&nm<400,'SCTB → SCVI (Villarrica) ≈ 360 NM, no 120: '+nm.toFixed(1));
+  // ENR 4.1: frecuencias (comprobadas contra la imagen de las páginas del AIP)
+  const fq=(c,s)=>(g(c).fq||[]).filter(x=>x[0]===s).map(x=>x[1]);
+  assert.deepEqual(fq('SCTB','TWR'),['132.45'],'Tobalaba TWR 132.45 (el PDF separa "132.45" de "MHz")');assert.deepEqual(fq('SCTB','GND'),['118.7']);
+  assert.deepEqual(fq('SCSN','TWR'),['134.6']);assert.deepEqual(fq('SCIE','APP'),['125.8','129.35'],'Concepción APP/RDR: principal y secundaria');
+  assert.deepEqual(g('SCIE').fq.find(x=>x[1]==='125.8'),['APP','125.8','PRI']);assert.deepEqual(fq('SCEL','ATIS'),['132.7','132.1']);
+  assert.deepEqual(fq('SCTC','GND'),['128.8'],'Maquehue (página militar, sin columna SER)');assert.deepEqual(fq('SCBQ','TWR'),['118.8','120.1'],'El Bosque');
+  assert.deepEqual(fq('SCVD','APP'),['118.7'],'Valdivia: no se pegan las radioayudas sueltas de Tabón/Tongoy');assert(!(g('SCVD').nv||[]).some(n=>n[1]==='TBN'||n[1]==='TOY'),'Tabón y Tongoy no son de Valdivia');
+  assert(AD.ad.filter(a=>a.fq).length>=48,'frecuencias de los AD controlados y con AFIS: '+AD.ad.filter(a=>a.fq).length);
+  for(const a of AD.ad.filter(x=>x.fq))for(const [s,f] of a.fq){const n=parseFloat(f);assert(n>=118&&n<=137&&/^\d{3}\.\d+$/.test(f),a.i+' '+s+' frecuencia VHF válida: '+f);}
+  // ATZ circulares: el centro del AIP (ENR 4.1) coincide con el ARP del AD 3 (dos tablas distintas)
+  const atz=AD.ad.filter(a=>a.atz);assert(atz.length>=15,'ATZ con centro y radio: '+atz.length);
+  for(const a of atz){const d=gc(a,{lat:a.atz.c[0],lon:a.atz.c[1]});assert(d<0.3,a.i+' ATZ centrada en el ARP: '+d.toFixed(2)+' NM');assert(a.atz.nm>=3&&a.atz.nm<=5,a.i+' radio de ATZ plausible');}
+  for(const a of AD.ad)assert(!/@/.test(a.nt||''),a.i+' sin correos en las notas');
 }
 (async()=>{
   // buscador y lista de aeródromos (aerodromos.js con un DOM mínimo)
