@@ -39,8 +39,10 @@ main{padding-bottom:calc(86px + env(safe-area-inset-bottom))}
 #home{max-width:none;padding:0}
 
 /* ---------- inicio ---------- */
-.hero{position:relative;height:340px;overflow:hidden;background:#101b26}
-.hero svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+.hero{position:relative;height:400px;overflow:hidden;background:#101b26}
+.hero-bg{position:absolute;inset:0;width:100%;height:100%;display:block}
+.hero-fg{position:absolute;left:0;right:0;bottom:54px;max-width:760px;margin:0 auto;padding:0 12px;display:flex;justify-content:center;pointer-events:none}
+.hero-plane{display:block;width:min(86vw,410px);height:auto;overflow:visible;transform:rotate(-4deg);filter:drop-shadow(0 10px 10px rgba(10,18,28,.4))}
 .hero-text{position:relative;max-width:760px;margin:auto;padding:calc(env(safe-area-inset-top) + 58px) 18px 0;color:#fff}
 .kicker{margin:0;color:#f6c27a;font-size:11px;font-weight:700;letter-spacing:3px;text-transform:uppercase}
 .hero h1{margin:4px 0 6px;font-size:46px;line-height:1;font-weight:800;letter-spacing:-1px}
@@ -184,7 +186,9 @@ svg.fig{width:100%;margin-top:12px;background:#fffdf8;border:1px solid var(--lin
 footer{max-width:760px;margin:18px auto 0;padding:0 18px 12px;color:var(--mut);font-size:12px}
 
 @media (min-width:700px){
-  .hero{height:380px}
+  .hero{height:440px}
+  .hero-fg{justify-content:flex-end}
+  .hero-plane{width:420px}
   .hero h1{font-size:56px}
   .hero-text{padding-top:74px}
   .tiles{grid-template-columns:repeat(4,1fr)}
@@ -192,4 +196,9 @@ footer{max-width:760px;margin:18px auto 0;padding:0 18px 12px;color:var(--mut);f
 @media (prefers-reduced-motion:no-preference){
   .tab.active{animation:fade .22s ease-out}
   @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+}
+
+@media (prefers-reduced-motion:no-preference){
+  .hero-plane{animation:bob 7s ease-in-out infinite}
+  @keyframes bob{0%,100%{transform:rotate(-4deg) translateY(0)}50%{transform:rotate(-4deg) translateY(-8px)}}
 }

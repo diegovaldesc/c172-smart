@@ -38,7 +38,7 @@
 <!-- ============ INICIO ============ -->
 <section id="home" class="tab active">
   <div class="hero">
-    <svg viewBox="0 0 800 340" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+    <svg class="hero-bg" viewBox="0 0 640 400" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
       <defs>
         <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stop-color="#101b26"/>
@@ -51,37 +51,74 @@
           <stop offset="1" stop-color="#ffd9a0" stop-opacity="0"/>
         </radialGradient>
       </defs>
-      <rect width="800" height="340" fill="url(#sky)"/>
+      <rect width="640" height="400" fill="url(#sky)"/>
       <g fill="#fff" opacity=".55">
-        <circle cx="60" cy="40" r="1.4"/><circle cx="150" cy="82" r="1"/><circle cx="240" cy="30" r="1.3"/><circle cx="330" cy="64" r="1"/>
-        <circle cx="520" cy="28" r="1.4"/><circle cx="610" cy="70" r="1"/><circle cx="700" cy="36" r="1.3"/><circle cx="760" cy="90" r="1"/>
+        <circle cx="60" cy="40" r="1.4"/><circle cx="150" cy="86" r="1"/><circle cx="240" cy="30" r="1.3"/><circle cx="330" cy="70" r="1"/>
+        <circle cx="430" cy="28" r="1.4"/><circle cx="520" cy="74" r="1"/><circle cx="600" cy="36" r="1.3"/><circle cx="470" cy="110" r="1"/>
       </g>
-      <circle cx="500" cy="250" r="120" fill="url(#glow)"/>
-      <circle cx="500" cy="252" r="38" fill="#ffd9a0"/>
+      <circle cx="470" cy="322" r="120" fill="url(#glow)"/>
+      <circle cx="470" cy="324" r="38" fill="#ffd9a0"/>
       <g fill="#fff" opacity=".2">
-        <rect x="60" y="150" width="170" height="7" rx="3.500"/><rect x="110" y="166" width="110" height="6" rx="3"/>
-        <rect x="560" y="118" width="150" height="7" rx="3.500"/><rect x="600" y="134" width="120" height="6" rx="3"/>
-        <rect x="300" y="205" width="130" height="6" rx="3"/>
+        <rect x="20" y="268" width="170" height="7" rx="3.5"/><rect x="70" y="284" width="110" height="6" rx="3"/>
+        <rect x="450" y="228" width="150" height="7" rx="3.5"/><rect x="490" y="244" width="120" height="6" rx="3"/>
       </g>
-      <path d="M0 262 L60 232 L112 250 L170 206 L216 240 L282 192 L332 232 L396 202 L452 244 L520 214 L578 248 L640 220 L700 250 L760 226 L800 242 V340 H0Z" fill="#5d7690"/>
-      <path d="M262 205 L282 192 L302 207 L291 203 L282 211 L273 203Z M150 220 L170 206 L186 218 L176 215 L170 221 L162 214Z M366 213 L396 202 L412 214 L402 211 L394 216 L384 210Z" fill="#eef2f6" opacity=".85"/>
-      <path d="M0 288 L80 252 L140 278 L214 232 L274 270 L352 220 L410 262 L474 238 L536 274 L616 234 L686 268 L744 250 L800 274 V340 H0Z" fill="#33495f"/>
-      <path d="M0 318 L90 292 L160 310 L250 278 L330 308 L420 286 L500 314 L590 288 L670 312 L740 296 L800 310 V340 H0Z" fill="#1a2a3a"/>
-      <g transform="translate(520 168) rotate(-8) scale(1.05)">
-        <path d="M-62 4 C-170 14 -260 34 -380 60" stroke="#fff" stroke-opacity=".5" stroke-width="3" stroke-dasharray="1 9" stroke-linecap="round" fill="none"/>
-        <path d="M-64 -4 L-76 -34 L-60 -34 L-42 -10Z" fill="#d9571a"/>
-        <path d="M-70 -2 L-44 -1 L-46 3 L-68 2Z" fill="#e9e1d2"/>
-        <path d="M72 2 L58 -8 L34 -10 L22 -22 L-8 -22 L-22 -13 L-64 -4 L-68 2 L-64 6 L-22 10 L40 14 L58 12Z" fill="#f6f0e2"/>
-        <path d="M-64 1 L66 5" stroke="#d9571a" stroke-width="3.500" fill="none"/>
-        <path d="M20 -19 L-6 -19 L-13 -12 L30 -9Z" fill="#2d4864"/>
-        <path d="M-14 -24 L34 -24 L34 -20.500 L-14 -20.500Z" fill="#f6f0e2"/>
-        <path d="M8 12 L12 -20.500" stroke="#c9c1b0" stroke-width="2"/>
-        <path d="M22 13 L18 26 M54 12 L52 26" stroke="#3a4651" stroke-width="2.500" fill="none"/>
-        <circle cx="17" cy="29" r="4.500" fill="#2a333c"/><circle cx="51" cy="29" r="4.500" fill="#2a333c"/>
-        <ellipse cx="74" cy="2" rx="2.500" ry="21" fill="#fff" opacity=".45"/>
-        <circle cx="73" cy="2" r="3" fill="#d9571a"/>
-      </g>
+      <path d="M0 322 L50 290 L96 310 L150 268 L196 302 L250 254 L298 294 L352 266 L402 308 L458 276 L510 310 L566 284 L610 302 L640 292 V400 H0Z" fill="#5d7690"/>
+      <path d="M232 267 L250 254 L268 269 L259 265 L250 273 L241 265Z M134 280 L150 268 L164 279 L156 277 L150 282 L143 276Z M338 276 L352 266 L366 277 L358 275 L352 280 L345 275Z M444 286 L458 276 L472 287 L464 285 L458 290 L451 284Z" fill="#eef2f6" opacity=".85"/>
+      <path d="M0 348 L70 314 L126 338 L190 298 L240 330 L310 284 L362 322 L420 300 L480 334 L548 298 L600 326 L640 312 V400 H0Z" fill="#33495f"/>
+      <path d="M0 378 L80 354 L150 370 L230 340 L300 368 L380 348 L450 374 L530 352 L600 372 L640 362 V400 H0Z" fill="#1a2a3a"/>
     </svg>
+    <div class="hero-fg">
+      <svg class="hero-plane" viewBox="36 34 354 122" role="img" aria-label="Cessna 172 en vuelo, vista lateral">
+      <defs>
+  <linearGradient id="pbody" gradientUnits="userSpaceOnUse" x1="0" y1="40" x2="0" y2="120">
+    <stop offset="0" stop-color="#ffffff"/><stop offset=".55" stop-color="#f4f2ea"/><stop offset="1" stop-color="#c7d1d7"/>
+  </linearGradient>
+  <linearGradient id="pglass" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#37587a"/><stop offset="1" stop-color="#1c3146"/>
+  </linearGradient>
+  <clipPath id="pclip"><path d="M364 88C354 84 344 84 336 83L330 83 306 64C282 61 238 61 214 64L196 72C176 75 150 78 126 78L87 43Q84 40 79 40L67 40Q63 40 62 45L54 88 52 92C104 98 172 111 220 119L318 120C334 120 352 118 364 115Z"/></clipPath>
+</defs>
+      <g id="plane172" stroke-linejoin="round" stroke-linecap="round" stroke="#1b2f3f" stroke-width="1.3">
+  <!-- estabilizador horizontal -->
+  <path d="M40 91Q54 87 96 88.500Q116 90 118 92Q100 95 60 95Q44 95 40 91Z" fill="#f1efe7"/>
+  <!-- fuselaje + deriva (una sola silueta) -->
+  <path d="M364 88C354 84 344 84 336 83L330 83 306 64C282 61 238 61 214 64L196 72C176 75 150 78 126 78L87 43Q84 40 79 40L67 40Q63 40 62 45L54 88 52 92C104 98 172 111 220 119L318 120C334 120 352 118 364 115Z" fill="url(#pbody)"/>
+  <g clip-path="url(#pclip)" stroke="none">
+    <path d="M370 99.500L256 99.500C196 99.500 156 94 120 79C102 71 88 58 76 38" fill="none" stroke="#d9571a" stroke-width="8"/>
+    <path d="M370 107L256 107C196 107 154 101 120 87C104 80 92 68 84 52" fill="none" stroke="#1b3b55" stroke-width="2.200"/>
+  </g>
+  <path d="M72 46 64 87" fill="none" stroke="#9fb0ba" stroke-width="1"/>
+  <path d="M336 84 334 117" fill="none" stroke="#8fa2ad" stroke-width="1"/>
+  <ellipse cx="361" cy="108" rx="2.600" ry="5" fill="#213747" stroke="none"/>
+  <!-- ventanas -->
+  <path d="M327 82 307 67 262 67 258 87 322 87Z" fill="url(#pglass)" stroke-width="1.4"/>
+  <path d="M253 67 223 67Q207 71 205 78L212 87 253 87Z" fill="url(#pglass)" stroke-width="1.4"/>
+  <path d="M301 68 293 68 284 86 292 86Z" fill="#fff" opacity=".13" stroke="none"/>
+  <!-- ala -->
+  <path d="M231 60.500 268 53Q300 50 313 57Q311 64 298 64L231 62.500Z" fill="#fbfaf5"/>
+  <path d="M250 60.500 290 54.500M246 62 296 62.500" fill="none" stroke="#b9c6cd" stroke-width=".9"/>
+  <!-- montante -->
+  <path d="M279 63 267 114" stroke="#1b2f3f" stroke-width="4.600" fill="none"/>
+  <path d="M279 63 267 114" stroke="#dfe6ea" stroke-width="2.400" fill="none"/>
+  <!-- tren de aterrizaje -->
+  <path d="M340 118 343.500 134" stroke-width="4.500" fill="none"/>
+  <circle cx="343.500" cy="141" r="9.500" fill="#16212b"/><circle cx="343.500" cy="141" r="4" fill="#aab6bd" stroke-width="1"/>
+  <path d="M271 117 259 133" stroke-width="5.500" fill="none"/>
+  <circle cx="257" cy="140" r="10" fill="#16212b"/><circle cx="257" cy="140" r="4.200" fill="#aab6bd" stroke-width="1"/>
+  <!-- hélice -->
+  <ellipse cx="373" cy="101" rx="3.500" ry="42" fill="#fff" opacity=".14" stroke="none"/>
+  <path d="M372 99 370.500 60 374.500 60 376 99Z" fill="#1d2933" stroke="none"/>
+  <path d="M370.500 60 374.500 60 374.200 68 370.800 68Z" fill="#f2b632" stroke="none"/>
+  <path d="M372 103 370.500 142 374.500 142 376 103Z" fill="#1d2933" stroke="none"/>
+  <path d="M370.500 142 374.500 142 374.200 134 370.800 134Z" fill="#f2b632" stroke="none"/>
+  <path d="M364 88Q377 91 383 101Q377 111 364 115Z" fill="#dfe5e9"/>
+  <path d="M367 93Q374 95 378 100" fill="none" stroke="#fff" stroke-width="1.500" stroke-opacity=".8"/>
+  <!-- detalles -->
+  <circle cx="65" cy="42.500" r="2" fill="#e63946" stroke="none"/>
+  <path d="M228 63.500 222 51" fill="none" stroke-width="1.100"/>
+</g>
+      </svg>
+    </div>
     <div class="hero-text">
       <p class="kicker">Planificador de vuelo</p>
       <h1>C172 <span>Smart</span></h1>
