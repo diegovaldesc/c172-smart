@@ -7,6 +7,7 @@
 <title>C172 Smart – Performance Cessna 172</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg">
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body data-view="home">
@@ -18,6 +19,7 @@
   <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M4.5 17a8.5 8.5 0 1 1 15 0M12 15l4.5-5.5"/><circle cx="12" cy="15" r="1.3"/></symbol>
   <symbol id="i-fuel" viewBox="0 0 24 24"><path d="M12 3.500s6 6.300 6 10.800a6 6 0 0 1-12 0C6 9.800 12 3.500 12 3.500z"/></symbol>
   <symbol id="i-plane" viewBox="0 0 24 24"><path d="M21 15.500v-1.800l-7.500-4.700V4a1.500 1.500 0 0 0-3 0v5L3 13.700v1.800l7.500-2.200v4.200L8.500 19v1.500l3.500-1 3.500 1V19l-2-1.500v-4.200z"/></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24"><path d="M9 4 3 6.500v13.500l6-2.500 6 2.500 6-2.500V4l-6 2.500L9 4zM9 4v13.500M15 6.500V20"/></symbol>
   <symbol id="i-swap" viewBox="0 0 24 24"><path d="M8 4v16M8 4 4.500 7.500M8 4l3.500 3.500M16 20V4M16 20l-3.500-3.500M16 20l3.500-3.500"/></symbol>
 </svg>
 
@@ -405,6 +407,65 @@
   </div>
 </section>
 
+<!-- ============ RUTA (mapa + planificador por tramos) ============ -->
+<section id="ruta" class="tab">
+  <div class="pagehead"><h1>Ruta</h1><p>Toca el mapa o busca un aeródromo para armar tu ruta. Rumbo, tiempo y combustible por tramo.</p></div>
+  <div class="rt-search">
+    <input id="rt_q" data-nosave type="search" placeholder="Agregar aeródromo: código o nombre (ej. SCTB, Vitacura)" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Buscar aeródromo para agregar a la ruta">
+    <div id="rt_list" class="adlist rt-list" role="listbox" hidden></div>
+  </div>
+  <div class="rt-mapwrap">
+    <div id="rt_map" role="application" aria-label="Mapa de la ruta con aeródromos y espacios aéreos"></div>
+    <div class="rt-tools">
+      <button type="button" id="rt_layers_btn" class="rt-fab" aria-expanded="false" aria-controls="rt_layers">Capas</button>
+      <button type="button" id="rt_fit" class="rt-fab" title="Ajustar el mapa a la ruta">Ver ruta</button>
+    </div>
+    <div id="rt_layers" class="rt-layers" hidden>
+      <p class="rt-lh">Mostrar en el mapa</p>
+      <div id="rt_layer_list"></div>
+      <p class="rt-lh">Fondo</p>
+      <div class="rt-base" id="rt_base">
+        <label><input type="radio" name="rt_base" value="osm" data-nosave checked> Calles (OpenStreetMap)</label>
+        <label><input type="radio" name="rt_base" value="topo" data-nosave> Relieve (OpenTopoMap)</label>
+        <label><input type="radio" name="rt_base" value="none" data-nosave> Sin fondo (solo espacios aéreos)</label>
+      </div>
+    </div>
+  </div>
+  <p class="hint" id="rt_hint">Toca un aeródromo para agregarlo a la ruta, o toca cualquier punto del mapa para ver qué espacios aéreos hay ahí y agregarlo.</p>
+
+  <div class="card" id="rt_card">
+    <div class="rt-head"><h2>Tu ruta</h2>
+      <span class="rt-acts">
+        <button type="button" class="mini" id="rt_rev">Invertir</button>
+        <button type="button" class="mini" id="rt_clear">Borrar</button>
+      </span>
+    </div>
+    <ol id="rt_pts" class="rt-pts"></ol>
+    <p class="hint" id="rt_empty">Aún no hay puntos. Busca un aeródromo arriba o toca el mapa.</p>
+    <div id="rt_vrc" class="rt-vrc" hidden></div>
+
+    <div id="rt_plan" hidden>
+      <div class="form rt-form">
+        <label>Viento desde (° verdaderos)<input id="ru_wdir" type="number" min="0" max="360" value="0"></label>
+        <label>Velocidad del viento (kt)<input id="ru_wspd" type="number" min="0" value="0"></label>
+        <label>Declinación magnética (° E +, W −)<input id="ru_var" type="number" step="0.1" value="0.9"></label>
+      </div>
+      <p class="hint" id="rt_var_note">Declinación: 0,9° E es la que publica el AIP en las cartas de Santiago (2023); cámbiala si vuelas en otra zona. El viento es el mismo en todos los tramos.</p>
+      <p class="hint" id="rt_cruise"></p>
+      <div id="rt_msg"></div>
+      <div class="phwrap"><table id="rt_tbl" class="grid phases rt-tbl"></table></div>
+      <div id="rt_kpis" class="kpis"></div>
+      <h3 class="subhead">Espacios aéreos en tu ruta</h3>
+      <div id="rt_air"></div>
+      <div class="rt-btns">
+        <button type="button" id="rt_to_wb" class="primary">Cargar este combustible en Peso y balance</button>
+        <button type="button" id="rt_to_fuel" class="secondary">Usar distancia y viento en Combustible</button>
+      </div>
+      <p class="hint" id="rt_note"></p>
+    </div>
+  </div>
+</section>
+
 <!-- ============ AVIÓN (velocidades, modelo, tablas) ============ -->
 <section id="model" class="tab">
   <div class="pagehead"><h1>Avión</h1><p>Datos del POH del modelo elegido (solo lectura).</p></div>
@@ -429,6 +490,7 @@
   <button type="button" data-tab="home" class="active" aria-current="page"><svg class="ic"><use href="#i-home"/></svg><span>Inicio</span></button>
   <button type="button" data-tab="wb"><svg class="ic"><use href="#i-scale"/></svg><span>Peso</span></button>
   <button type="button" data-tab="perf"><svg class="ic"><use href="#i-gauge"/></svg><span>Performance</span></button>
+  <button type="button" data-tab="ruta"><svg class="ic"><use href="#i-map"/></svg><span>Ruta</span></button>
   <button type="button" data-tab="fuel"><svg class="ic"><use href="#i-fuel"/></svg><span>Combustible</span></button>
   <button type="button" data-tab="model"><svg class="ic"><use href="#i-plane"/></svg><span>Avión</span></button>
 </nav>
@@ -436,5 +498,8 @@
 <script src="modelos.js"></script>
 <script src="app.js"></script>
 <script src="aerodromos.js"></script>
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="ruta.js"></script>
+<script src="mapa.js"></script>
 </body>
 </html>

@@ -138,8 +138,14 @@
       // con origen y destino, la distancia de la ruta pasa al planificador de combustible
       const rt = route(get(el('fl_from').value), get(el('fl_to').value));
       if (rt) el('r_dist').value = Math.ceil(rt.nm);
+      if (window.MAPA && window.MAPA.homeChanged) window.MAPA.homeChanged(key, a);   // la ruta del mapa sigue al origen/destino de Inicio
       recalcNow();
     }
+  }
+  // Origen y destino desde el mapa (null = sin cambio). El mapa ya conoce el cambio: no se le avisa de vuelta.
+  function setEnds(from, to) {
+    if (from !== undefined && from !== null && get(from) && el('fl_from').value !== from) setAerodrome('from', from, false);
+    if (to !== undefined && to !== null && get(to) && el('fl_to').value !== to) setAerodrome('to', to, false);
   }
 
   function swap() {
@@ -304,7 +310,9 @@
   }
 
   // ---------- arranque ----------
-  window.AD = { get, route, search: (q, n) => search(q, n).items, searchAll: search, browse };
+  let readyFns = [], isReady = false;
+  const whenReady = fn => { if (isReady) fn(); else readyFns.push(fn); };
+  window.AD = { get, route, search: (q, n) => search(q, n).items, searchAll: search, browse, all: () => DB, freqText, setEnds, whenReady, alias: icao => ALIAS[icao] || '' };
 
   async function init() {
     const status = el('ad_status');
@@ -329,6 +337,7 @@
       if (v && get(v)) setAerodrome(key, v, true); else el('fl_' + key).value = '';
     });
     recalcNow();
+    isReady = true; readyFns.forEach(fn => fn()); readyFns = [];
   }
   init();
 })();

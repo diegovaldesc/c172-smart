@@ -522,7 +522,7 @@ function calcFuel() {
 
   let msg;
   if (over) msg = ['bad', `<b>No llegas sin escala.</b> La ruta pide ${dF(total)} y los tanques rinden ${dF(LIM.fuelMax, 0)}. Con tanques llenos y ${fmt(resMin)} min de reserva alcanzas unas ${fmt(rangeFull)} NM a ${fmt(gs)} kt de velocidad suelo. Opciones: hacer escala, bajar RPM o aceptar menos reserva.`];
-  else if (short) msg = ['bad', `<b>El combustible cargado no alcanza.</b> Tienes ${dF(have)} y necesitas ${dF(total)}: faltan ${dF(total - have)}. Con lo cargado llegas hasta unas ${fmt(rangeLoaded)} NM con reserva. Usa el botón de abajo para cargar lo necesario.`];
+  else if (short) msg = ['bad', `<b>El combustible cargado no alcanza.</b> Tienes ${dF(have)} y necesitas ${dF(total)}: faltan ${(total - have) / ff < 0.05 ? 'menos de 0,1 ' + (uf() === 'L' ? 'L' : 'gal') : dF(total - have)}. Con lo cargado llegas hasta unas ${fmt(rangeLoaded)} NM con reserva. Usa el botón de abajo para cargar lo necesario.`];
   else msg = ['ok', `<b>Alcanza.</b> Con ${dF(have)} llegas con ${dF(have - total)} sobre la reserva de ${fmt(resMin)} min.`];
   $('fuel_msg').innerHTML = `<div class="msg ${msg[0]}">${msg[1]}</div>` + warns.map(w => `<div class="msg warn">${w}</div>`).join('');
 
@@ -543,6 +543,34 @@ function calcFuel() {
   $('fuel_note').textContent = note + ' La distancia es en línea recta entre aeródromos: la ruta real suele ser algo más larga.';
   SUM.fuel = { need: total, have, max: LIM.fuelMax };
 }
+
+// ---------- Puente para el mapa de rutas (mapa.js) ----------
+// Usa los mismos datos de crucero y ascenso que la pestaña Combustible (tablas del POH o valores manuales).
+function routeParams() {
+  const poh = $('r_mode').value !== 'man', resMin = num('r_res'), taxi = LIM.taxi;
+  if (!poh) return { tas: num('r_tas'), gph: num('r_burn') * ff, climb: { min: 0, gal: num('r_climb') * ff, nm: 0 }, taxi, resMin, alt: num('r_alt'), poh, info: `Valores manuales: ${fmt(num('r_tas'))} kt, ${fmt(num('r_burn'), 1)} ${uf() === 'L' ? 'L' : 'gal'}/h` };
+  const aD = atmosphere(), dev = num('r_isa'), alt = num('r_alt'), rpm = num('r_rpm');
+  const cr = cruiseAt(alt, rpm, dev);
+  if (cr.out) return { err: cr.out };
+  const c = climbBetween(aD.pa, alt, dev);
+  if (c.out) return { err: c.out };
+  return { tas: cr.tas, gph: cr.gph, climb: { min: c.min, gal: c.gal, nm: c.nm }, taxi, resMin, alt, poh, info: `Tablas del POH: ${fmt(alt)} ft, ${fmt(rpm)} RPM, ${fmt(cr.tas)} kt TAS, ${fmt(cr.gph / ff, 1)} ${uf() === 'L' ? 'L' : 'gal'}/h` };
+}
+window.APP = {
+  go: t => go(t), recalc: () => recalc(), params: routeParams,
+  fmt, hm, mm, dF, uf: () => (uf() === 'L' ? 'L' : 'gal'),
+  // combustible de la ruta (con reserva y rodaje) a Peso y balance: se redondea hacia arriba, sin pasar del tanque
+  applyFuel(gal) {
+    const cap = Math.floor(LIM.fuelMax / ff * 10 + 1e-9) / 10;
+    $('f_gal').value = Math.min(cap, +(Math.ceil(gal / ff * 10 - 1e-9) / 10).toFixed(1));
+    recalc(); go('wb');
+  },
+  tankCap: () => LIM.fuelMax,
+  have: () => num('f_gal') * ff,
+  // distancia y viento de frente medio de la ruta al planificador de un solo tramo de Combustible
+  legacy(nm, head) { $('r_dist').value = Math.ceil(nm); $('r_wind').value = Math.round(head); recalc(); },
+  altitude: () => num('r_alt'),
+};
 
 // ---------- Inicio: vuelo y resumen ----------
 function setRow(id, cls, title, text) {
@@ -747,18 +775,19 @@ function go(tab, open) {
   document.body.dataset.view = tab;
   if (open) showSub(tab + '_' + open);
   window.scrollTo(0, 0);
+  if (tab === 'ruta' && window.MAPA) window.MAPA.shown();   // Leaflet necesita medir el mapa ya visible
 }
 
 // ---------- Eventos ----------
 // ---------- Validación ----------
 // Si falta un dato o es imposible, se suspenden los resultados: es mejor no mostrar nada que un número falso.
-const SIGNED = ['elev', 'a_elev', 'oat', 'a_oat', 'r_wind', 'r_isa'];                       // pueden ser negativos
+const SIGNED = ['elev', 'a_elev', 'oat', 'a_oat', 'r_wind', 'r_isa', 'ru_var'];             // pueden ser negativos
 const POSITIVE = ['w_empty', 'to_w', 'ld_w', 'qnh', 'a_qnh', 'r_tas', 'r_burn', 'to_len', 'ld_len', 'r_alt', 'r_rpm'];
 // En blanco valen 0 (p. ej. "sin pasajeros atrás"); la pista y la dirección del viento solo importan si hay viento
-const BLANK_OK = ['w_front', 'w_rear', 'w_bagA', 'w_bagB', 'f_gal', 'wspd', 'a_wspd', 'r_dist', 'r_taxi', 'r_climb'];
+const BLANK_OK = ['w_front', 'w_rear', 'w_bagA', 'w_bagB', 'f_gal', 'wspd', 'a_wspd', 'r_dist', 'r_taxi', 'r_climb', 'ru_wdir', 'ru_wspd', 'ru_var'];
 const NEEDS_WIND = { rwy: 'wspd', wdir: 'wspd', a_rwy: 'a_wspd', a_wdir: 'a_wspd' };
 // Rangos físicamente razonables: atrapan errores de tipeo (p. ej. QNH 10013)
-const RANGE = { elev: [-1500, 20000], a_elev: [-1500, 20000], qnh: [850, 1100], a_qnh: [850, 1100], oat: [-60, 60], a_oat: [-60, 60], wspd: [0, 150], a_wspd: [0, 150], r_tas: [30, 300], r_wind: [-150, 150], r_alt: [0, 30000], r_rpm: [500, 3500], r_isa: [-60, 60] };
+const RANGE = { elev: [-1500, 20000], a_elev: [-1500, 20000], qnh: [850, 1100], a_qnh: [850, 1100], oat: [-60, 60], a_oat: [-60, 60], wspd: [0, 150], a_wspd: [0, 150], r_tas: [30, 300], r_wind: [-150, 150], r_alt: [0, 30000], r_rpm: [500, 3500], r_isa: [-60, 60], ru_wdir: [0, 360], ru_wspd: [0, 150], ru_var: [-30, 30] };
 const DEP_IDS = ['elev', 'qnh', 'oat', 'rwy', 'wdir', 'wspd', 'to_w', 'to_len'], ARR_IDS = ['a_elev', 'a_qnh', 'a_oat', 'a_rwy', 'a_wdir', 'a_wspd', 'ld_w', 'ld_len'];
 let invalidMsg = '';
 
@@ -816,6 +845,7 @@ function recalc() {
     return;
   }
   calcWB(); calcPerf(); calcFuel(); renderHome();
+  if (window.MAPA && window.MAPA.refresh) window.MAPA.refresh();
 }
 
 document.addEventListener('click', e => {

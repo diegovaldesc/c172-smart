@@ -249,3 +249,88 @@ svg.fig:empty{display:none}
 .phases td:first-child{min-width:128px}
 .phases tfoot td{font-weight:800;border-top:2px solid var(--line)}
 .routebox.warnbox{background:#f4e7c6;border-color:#e0c37a;color:#5e4309}
+
+/* ---------- ruta y mapa ---------- */
+#ruta.tab{max-width:1000px}
+.rt-search{position:relative;margin:6px 0 8px}
+.rt-search input{width:100%;font-size:16px;padding:12px 14px;border-radius:12px;border:1px solid #c4b9a2;background:var(--field)}
+.rt-list{position:absolute;left:0;right:0;top:100%;z-index:60;box-shadow:var(--shadow);margin-top:4px}
+.rt-mapwrap{position:relative;border-radius:14px;overflow:hidden;border:1px solid var(--line);box-shadow:var(--shadow)}
+#rt_map{height:min(64vh,560px);height:min(64dvh,560px);min-height:360px;background:#e9e4d6;isolation:isolate;z-index:0;font-family:inherit}
+#rt_map.rt-nobase{background:#f6f3ea}
+.rt-tools{position:absolute;right:10px;top:10px;z-index:500;display:flex;flex-direction:column;gap:8px}
+.rt-fab{background:#fff;border:1px solid #b9b09a;border-radius:10px;padding:9px 12px;font-weight:700;font-size:13px;color:var(--ink);box-shadow:0 2px 6px rgba(0,0,0,.25);cursor:pointer;min-height:40px}
+.rt-fab:hover{background:var(--acc-soft)}
+.rt-layers{position:absolute;right:88px;top:10px;z-index:550;width:min(300px,calc(100% - 108px));max-height:calc(100% - 20px);overflow:auto;background:#fffdf8;border:1px solid #b9b09a;border-radius:12px;padding:10px 12px;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.rt-layers[hidden]{display:none}
+.rt-layers label{display:flex;align-items:center;gap:8px;padding:7px 2px;font-size:13.5px;cursor:pointer}
+.rt-layers input{width:18px;height:18px;flex:none}
+.rt-lh{margin:6px 0 2px;font:800 11px var(--mono);letter-spacing:.8px;text-transform:uppercase;color:var(--accd)}
+.rt-sw{display:inline-flex;gap:2px;flex:none}
+.rt-sw i{width:12px;height:12px;border-radius:3px;display:block}
+/* marcadores */
+.rt-adw,.rt-wpw,.rt-legw,.rt-sl{background:none;border:0}
+.rt-ad{position:relative;width:0;height:0}
+.rt-ad i{position:absolute;left:-6px;top:-6px;width:12px;height:12px;border-radius:50%;background:#fff;border:2.5px solid #16222e;box-shadow:0 0 0 1.5px rgba(255,255,255,.9)}
+.rt-ad.t-AP i{left:-8px;top:-8px;width:16px;height:16px;border-width:3.5px;background:#2f5d8a;border-color:#16222e}
+.rt-ad.u-PVT i{border-color:#8a8372;border-width:2px;width:10px;height:10px;left:-5px;top:-5px}
+.rt-ad.u-MIL i{border-color:#556b2f;background:#c9d8a8}
+.rt-lbl{position:absolute;left:9px;top:-8px;font:700 11px var(--mono);color:#16222e;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff,0 0 2px #fff;white-space:nowrap;pointer-events:none}
+.rt-z-low .rt-lbl,.rt-z-low .rt-sl{display:none}
+.rt-z-low .rt-ad.u-PVT i{width:7px;height:7px;left:-3.5px;top:-3.5px}
+.rt-sl span{position:absolute;transform:translate(-50%,-50%);font:800 11px var(--mono);white-space:nowrap;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 2px #fff;pointer-events:none}
+.rt-wp{position:relative;width:0;height:0}
+.rt-wp b{position:absolute;left:-13px;top:-13px;width:26px;height:26px;border-radius:50%;background:#d9571a;color:#fff;border:3px solid #fff;font:800 13px/20px var(--mono);text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.5)}
+.rt-wp.drag b{border-radius:7px;background:#2f5d8a;cursor:grab}
+.rt-wp span{position:absolute;left:16px;top:-9px;font:800 12px var(--mono);color:#16222e;background:rgba(255,255,255,.9);padding:1px 5px;border-radius:5px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.rt-leg{position:absolute;transform:translate(-50%,-50%);font:800 11.5px var(--mono);background:#16222e;color:#fff;padding:2px 7px;border-radius:12px;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.5);pointer-events:none}
+/* ventana emergente */
+.rt-popup .leaflet-popup-content{margin:10px 12px;font-family:inherit}
+.rt-pop{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--txt);min-width:200px}
+.rt-pop b{font-size:14px}
+.rt-pop small{color:var(--mut);font-size:12px;line-height:1.35}
+.rt-fq{white-space:pre-line}
+.rt-sh{font-weight:700;color:var(--ink)!important;margin-top:4px}
+.rt-pbtn{margin-top:6px;background:#d9571a;color:#fff;border:0;border-radius:9px;padding:10px;font-weight:800;font-size:14px;cursor:pointer;min-height:42px}
+.rt-sp{display:grid;grid-template-columns:12px 1fr;gap:2px 8px;align-items:start;padding:3px 0}
+.rt-sp i{width:12px;height:12px;border-radius:3px;margin-top:3px}
+.rt-sp span b{font-size:13px;display:block}
+.rt-sp span small{display:block}
+.rt-spn{grid-column:2}
+/* panel */
+.rt-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}
+.rt-head h2{margin:0}
+.rt-acts{display:flex;gap:6px}
+.rt-acts .mini{min-height:34px}
+.rt-pts{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.rt-pts li{display:flex;align-items:center;gap:10px;background:var(--field);border:1px solid var(--line);border-radius:10px;padding:7px 8px}
+.rt-n{flex:none;width:26px;height:26px;border-radius:50%;background:#d9571a;color:#fff;font:800 13px/26px var(--mono);text-align:center}
+.rt-nm{display:flex;flex-direction:column;min-width:0;flex:1;line-height:1.25}
+.rt-nm em{font-style:normal;font-weight:700;overflow-wrap:anywhere}
+.rt-nm small{color:var(--mut);font-size:12px}
+.rt-ia{display:flex;gap:4px;flex:none}
+.rt-ib{width:38px;height:38px;border-radius:9px;border:1px solid #c4b9a2;background:#fff;color:var(--ink);font-size:14px;cursor:pointer}
+.rt-ib:disabled{opacity:.35;cursor:default}
+.rt-form{margin-top:12px}
+.rt-tbl td:first-child{min-width:150px}
+.rt-btns{display:grid;gap:8px;margin-top:14px}
+.rt-btns .primary{margin-top:0}
+.rt-btns .secondary{background:var(--field);border:1px solid #c4b9a2;color:var(--accd);font-weight:800;padding:11px;border-radius:10px;font-size:14.5px;cursor:pointer}
+.rt-btns button:disabled{opacity:.45;cursor:default}
+.rt-air-leg{margin-top:10px;border-top:1px solid var(--line);padding-top:6px}
+.rt-air-leg h4{margin:0 0 4px;font-size:13px}
+.rt-none{color:var(--mut)}
+.rt-air-leg .rt-sp.r-below,.rt-air-leg .rt-sp.r-above{opacity:.55}
+.rt-air-leg .rt-sp.r-in .rt-rel{color:var(--bad);font-weight:700}
+@media (min-width:900px){#rt_map{height:min(70vh,640px)}}
+/* rutas visuales de Santiago (cartas VRC) */
+.rt-vlw{background:none;border:0}
+.rt-vl{position:absolute;transform:translate(-50%,-50%);font:800 10.5px var(--mono);background:rgba(255,255,255,.88);color:#16222e;padding:1px 4px;border-radius:5px;border:1px solid rgba(0,0,0,.3);white-space:nowrap;pointer-events:none}
+.rt-vl{display:none}
+.rt-z-vrc .rt-vl{display:block}
+.rt-vrc{margin:10px 0 4px;padding-top:6px;border-top:1px dashed var(--line)}
+.rt-vr{display:grid;grid-template-columns:12px 1fr auto auto;gap:4px 8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)}
+.rt-vr i{width:12px;height:12px;border-radius:3px}
+.rt-vr b{display:block;font-size:13px}
+.rt-vr small{display:block;color:var(--mut);font-size:12px;line-height:1.35}
+.rt-vr .rt-use{background:#d9571a;color:#fff;border-color:#d9571a}
