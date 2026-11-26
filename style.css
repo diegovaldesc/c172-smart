@@ -202,3 +202,12 @@ footer{max-width:760px;margin:18px auto 0;padding:0 18px 12px;color:var(--mut);f
   .hero-plane{animation:bob 7s ease-in-out infinite}
   @keyframes bob{0%,100%{transform:rotate(-4deg) translateY(0)}50%{transform:rotate(-4deg) translateY(-8px)}}
 }
+
+/* ---------- validación y accesibilidad ---------- */
+button:focus-visible,.brand:focus-visible{outline:3px solid var(--sky);outline-offset:2px}
+button:disabled{opacity:.5;cursor:not-allowed}
+[aria-invalid=true]{border:2px solid var(--bad);background:#fff3f0}
+#validation{position:sticky;top:calc(env(safe-area-inset-top) + 58px);z-index:25;max-width:736px;margin:10px 12px;box-shadow:var(--shadow);font-weight:600}
+body[data-view=home] #validation{display:none}
+.kpi b{font-variant-numeric:tabular-nums}
+@media (min-width:760px){#validation{margin:10px auto}}

@@ -69,6 +69,7 @@
   function renderList(key, items) {
     const box = el(`fl_${key}_list`);
     box.replaceChildren();
+    if (!items.length) box.append(make('p', 'Sin coincidencias. Busca por código, nombre o ciudad.', 'hint'));
     for (const a of items) {
       const b = make('button');
       b.type = 'button';
@@ -195,17 +196,24 @@
     const [idx, end] = (sel.value || '0:a').split(':');
     const r = a.rw[+idx] || {};
     const des = r[end] || '';
-    const done = [];
-    if (a.el != null) { el(cfg.elev).value = Math.round(a.el); done.push(`elevación ${nf(a.el)} ft`); }
+    const done = [], missing = [];
+    // Lo que el aeródromo no trae se deja en blanco: nunca debe quedar el valor de la pista o aeródromo anterior.
+    [cfg.elev, cfg.rwy, cfg.len].forEach(id => { el(id).value = ''; });
+    if (a.el != null) { el(cfg.elev).value = Math.round(a.el); done.push(`elevación ${nf(a.el)} ft`); } else missing.push('elevación');
     const num = parseInt(des, 10);
-    if (num >= 1 && num <= 36) { el(cfg.rwy).value = num; done.push(`pista ${des}`); }
-    if (r.l) { el(cfg.len).value = Math.round(r.l * M_TO_FT); done.push(`largo ${nf(Math.round(r.l * M_TO_FT))} ft`); }
-    const surfIdx = hasPaved(r.sf || a.sf) ? 0 : (a.sf ? 2 : -1);
+    if (num >= 1 && num <= 36) { el(cfg.rwy).value = num; done.push(`pista ${des}`); } else missing.push('número de pista');
+    if (r.l) { el(cfg.len).value = Math.round(r.l * M_TO_FT); done.push(`largo ${nf(Math.round(r.l * M_TO_FT))} ft`); } else missing.push('largo');
+    const surface = r.sf || a.sf;
+    const surfIdx = hasPaved(surface) ? 0 : (surface ? 2 : -1);
     if (surfIdx >= 0) {
       el(cfg.surf).selectedIndex = surfIdx;
       done.push(surfIdx === 0 ? 'superficie pavimentada' : 'superficie sin pavimentar o mixta (se usa la corrección de pasto seco como aproximación; revisa la superficie)');
+    } else {
+      el(cfg.surf).selectedIndex = 0;
+      missing.push('superficie (revisa la corrección elegida)');
     }
-    el(p + '_apply').textContent = done.length ? 'Cargado en el cálculo: ' + done.join(', ') + '.' : 'No había datos para cargar.';
+    el(p + '_apply').textContent = (done.length ? 'Cargado en el cálculo: ' + done.join(', ') + '.' : 'No había datos para cargar.')
+      + (missing.length ? ' Sin dato: ' + missing.join(', ') + '. Complétalo a mano.' : '');
     el(cfg.saved).value = sel.value;
   }
 

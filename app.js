@@ -6,15 +6,17 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 // ---------- Datos del modelo (se leen de la pestaña "Avión") ----------
 let LIM = {}, TAKEOFF = [], LANDING = [];
-const DEFAULT_TAB = [[0, 1, 1], [2000, 1, 1]];
 
+// Tabla de performance: altitud, recorrido en tierra, distancia a 50 ft (una fila por línea).
+// Se ignoran líneas en blanco y separadores sobrantes (p. ej. una coma al final). Cualquier otra
+// irregularidad devuelve null y la app suspende los resultados en vez de calcular con datos falsos.
 function parseTable(id) {
-  const rows = $(id).value.split('\n')
-    .map(l => l.split(/[,;\s]+/).map(parseFloat))
-    .filter(r => r.length >= 3 && r.slice(0, 3).every(isFinite))
-    .map(r => r.slice(0, 3))
+  const rows = $(id).value.split('\n').map(l => l.trim()).filter(Boolean)
+    .map(l => l.split(/[,;\s]+/).filter(Boolean).map(Number))
     .sort((a, b) => a[0] - b[0]);
-  return rows.length >= 2 ? rows : DEFAULT_TAB;
+  const ok = rows.length >= 2 && rows.every((r, i) =>
+    r.length === 3 && r.every(Number.isFinite) && r[1] > 0 && r[2] >= r[1] && (!i || r[0] > rows[i - 1][0]));
+  return ok ? rows : null;
 }
 // ---------- Unidades ----------
 // Internamente todo se calcula en lb y galones US; los campos y resultados se muestran en la unidad elegida.
@@ -142,6 +144,8 @@ function calcWB() {
   if (bB > LIM.bagBMax) add(`Equipaje B supera ${dW(LIM.bagBMax)}.`, 'bad');
   if (bA + bB > LIM.bagTotal) add(`Equipaje total supera ${dW(LIM.bagTotal)}.`, 'bad');
   if (gal > LIM.fuelMax) add(`Combustible supera los ${dF(LIM.fuelMax, 0)} utilizables.`, 'bad');
+  if (gal < LIM.taxi) add('El combustible cargado no alcanza para el rodaje indicado.', 'bad');
+  if (!inEnvelope(zfw.w, zfw.cg)) add('El CG queda fuera de la envolvente al consumir el combustible.', 'bad');
   if (!msgs.length) add(`Dentro de límites. Margen de peso al MTOW: ${dW(LIM.mtow - toff.w)}.`, 'ok');
   if (toff.w <= LIM.mtow && gal < LIM.fuelMax) {
     const extra = Math.min(LIM.fuelMax - gal, Math.floor((LIM.mtow - toff.w) / LIM.lbPerGal));
@@ -186,7 +190,7 @@ function drawChart(points) {
     const fill = ok ? color : '#a8342a';
     s += `<circle cx="${px}" cy="${py}" r="6" fill="${i === 0 ? '#fffdf8' : fill}" stroke="${i === 0 ? fill : '#fff'}" stroke-width="${i === 0 ? 2.5 : 1.5}"/>`;
     const left = px > (X(LIM.fwdMin) + X(LIM.aft)) / 2;
-    s += `<text x="${left ? px - 10 : px + 10}" y="${i === 0 ? py - 9 : py + 4}" fill="#26292c" font-size="11" font-weight="700" text-anchor="${left ? 'end' : 'start'}">${name}</text>`;
+    s += `<text x="${left ? px - 10 : px + 10}" y="${i === 0 ? py - 13 : py + 16}" fill="#26292c" font-size="11" font-weight="700" text-anchor="${left ? 'end' : 'start'}">${name}</text>`;
   });
   // leyenda
   s += `<text x="${L}" y="16" fill="#26292c" font-size="12" font-weight="700">Envolvente de CG · categoría normal</text>`;
@@ -203,7 +207,7 @@ function drawRunway(svgId, cfg) {
   const X0 = 16, X1 = 464, Y0 = 62, Y1 = 112, YC = 87;
   // pista mucho más larga de lo necesario: se dibuja solo el primer tramo, con marca de corte
   const reach = Math.max(cfg.need, cfg.b), cut = cfg.len > reach * 2.2;
-  const span = Math.max(cut ? reach * 1.9 : cfg.len, cfg.need, cfg.b) * 1.04;
+  const span = Math.max(1, cut ? reach * 1.9 : cfg.len, cfg.need, cfg.b) * 1.04;
   const sx = ft => X0 + ft / span * (X1 - X0);
   const rEnd = cut ? X1 : sx(cfg.len);
   let s = '';
@@ -217,7 +221,7 @@ function drawRunway(svgId, cfg) {
   for (let i = 0; i < 6; i++) s += `<rect x="${X0 + 4}" y="${Y0 + 5 + i * 7.5}" width="12" height="4" fill="#f4efe3"/>`;
   if (!cut) s += `<rect x="${rEnd - 5}" y="${Y0}" width="3" height="${Y1 - Y0}" fill="#f4efe3"/>`;
   for (let x = X0 + 40; x < rEnd - 30; x += 28) s += `<rect x="${x}" y="${YC - 1}" width="14" height="2" fill="#d8d2c2"/>`;
-  s += `<text x="${X0 + 22}" y="${YC + 4}" fill="#f4efe3" font-size="13" font-weight="700" text-anchor="start">${String(Math.round(cfg.rwy || 0)).padStart(2, '0')}</text>`;
+  s += `<text x="${X0 + 22}" y="${YC + 4}" fill="#f4efe3" font-size="13" font-weight="700" text-anchor="start">${cfg.rwy > 0 ? String(Math.round(cfg.rwy)).padStart(2, '0') : ''}</text>`;
 
   const roll = cfg.kind === 'to'
     ? `<rect x="${X0}" y="${YC - 5}" width="${sx(cfg.a) - X0}" height="10" fill="#c4561b" opacity=".9"/>`
@@ -329,7 +333,7 @@ let fuelNeeded = 0, enrouteFuel = 0;
 const hm = hrs => { const t = Math.round(hrs * 60); return `${Math.floor(t / 60)} h ${String(t % 60).padStart(2, '0')} min`; };
 function calcFuel() {
   const d = num('r_dist'), tas = num('r_tas'), wind = num('r_wind'), burn = num('r_burn') * ff;
-  const gs = Math.max(1, tas - wind);
+  const gs = tas - wind;   // validateInputs() garantiza gs > 0 antes de llegar aquí
   const hrs = d / gs;
   const trip = hrs * burn;
   const resMin = num('r_res');
@@ -339,6 +343,7 @@ function calcFuel() {
   fuelNeeded = total;
   enrouteFuel = trip + climb;
   const over = total > LIM.fuelMax;
+  $('fuel_apply').disabled = over;   // no se puede cargar lo que no cabe en los tanques
   $('fuel_out').innerHTML =
     kpi('Velocidad suelo', fmt(gs) + ' kt') +
     kpi('Tiempo en ruta', hm(hrs)) +
@@ -361,7 +366,8 @@ const fitText = o => o.ok === 'ok' ? `Con margen del 25 %: ${fmt(o.need)} ft de 
   : o.ok === 'warn' ? `Sin el margen del 25 %: pide ${fmt(o.need)} ft, hay ${fmt(o.len)} ft`
   : `No cabe: pide ${fmt(o.need)} ft, hay ${fmt(o.len)} ft`;
 
-function renderHome() {
+// valid = false: el boleto de vuelo se sigue actualizando, pero el resumen avisa que faltan datos
+function renderHome(valid = true) {
   const A = window.AD;
   const f = A ? A.get($('fl_from').value) : null, t = A ? A.get($('fl_to').value) : null;
   $('tk_from').textContent = f ? f.i : '----';
@@ -373,16 +379,22 @@ function renderHome() {
   $('chip').textContent = f || t ? `${f ? f.i : '····'} → ${t ? t.i : '····'}` : 'Sin vuelo';
 
   const rt = f && t ? A.route(f, t) : null;
-  const gs = Math.max(1, num('r_tas') - num('r_wind'));
+  const gs = num('r_tas') - num('r_wind');
   $('tk_dist').textContent = rt ? fmt(rt.nm) + ' NM' : '';
   $('tk_meta').textContent = rt
-    ? `En línea recta · rumbo verdadero ${String(Math.round(rt.brg) % 360).padStart(3, '0')}° · ETE ${hm(rt.nm / gs)} a ${fmt(gs)} kt`
+    ? `En línea recta · rumbo verdadero ${String(Math.round(rt.brg) % 360).padStart(3, '0')}°` + (gs > 0 ? ` · ETE ${hm(rt.nm / gs)} a ${fmt(gs)} kt` : '')
     : (f && t ? 'Sin coordenadas para calcular la distancia.' : 'Elige origen y destino para ver distancia, rumbo y tiempo.');
   $('fuel_route').hidden = !rt;
   if (rt) $('fuel_route_txt').textContent = `${f.i} → ${t.i}: ${fmt(rt.nm)} NM en línea recta`;
 
   $('model_specs').textContent = `MTOW ${dW(LIM.mtow)} · ${dF(LIM.fuelMax, 0)} utilizables`;
 
+  if (!valid) {
+    setRow('sum_wb', 'warn', 'Peso y balance', invalidMsg);
+    [['sum_to', 'Despegue'], ['sum_ld', 'Aterrizaje'], ['sum_fuel', 'Combustible']]
+      .forEach(([id, title]) => setRow(id, 'warn', title, 'Resultado suspendido hasta corregir los datos.'));
+    return;
+  }
   const w = SUM.wb;
   if (w) setRow('sum_wb', w.ok ? 'ok' : 'bad', 'Peso y balance',
     w.ok ? `Dentro de límites · despegue ${dW(w.tow)} · margen ${dW(w.margin)}`
@@ -391,10 +403,12 @@ function renderHome() {
   if (SUM.ld) setRow('sum_ld', SUM.ld.ok, 'Aterrizaje' + (t ? ' · ' + t.i : ''), fitText(SUM.ld));
   const fu = SUM.fuel;
   if (fu) {
-    const cls = fu.need > fu.max || fu.have < fu.need ? 'bad' : 'ok';
+    // 1e-9: tolerancia de coma flotante (p. ej. litros convertidos de ida y vuelta)
+    const short = fu.have + 1e-9 < fu.need;
+    const cls = fu.need > fu.max || short ? 'bad' : 'ok';
     setRow('sum_fuel', cls, 'Combustible',
       fu.need > fu.max ? `La ruta pide ${dF(fu.need)} y el tanque rinde ${dF(fu.max, 0)}`
-        : fu.have < fu.need ? `Cargado ${dF(fu.have)}, necesitas ${dF(fu.need)}`
+        : short ? `Cargado ${dF(fu.have)}, necesitas ${dF(fu.need)}`
         : `Cargado ${dF(fu.have)} · necesitas ${dF(fu.need)} con reserva`);
   }
 }
@@ -404,7 +418,11 @@ function showSub(panelId) {
   const p = $(panelId);
   if (!p || !p.dataset.seg) return;
   const seg = $(p.dataset.seg);
-  seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.sub === panelId));
+  seg.querySelectorAll('button').forEach(b => {
+    const on = b.dataset.sub === panelId;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-selected', String(on));
+  });
   document.querySelectorAll(`[data-seg="${seg.id}"]`).forEach(x => x.classList.toggle('on', x === p));
 }
 function go(tab, open) {
@@ -421,7 +439,73 @@ function go(tab, open) {
 }
 
 // ---------- Eventos ----------
-function recalc() { save(); readModel(); calcWB(); calcPerf(); calcFuel(); renderHome(); }
+// ---------- Validación ----------
+// Si falta un dato o es imposible, se suspenden los resultados: es mejor no mostrar nada que un número falso.
+const SIGNED = ['elev', 'a_elev', 'oat', 'a_oat', 'r_wind'];                       // pueden ser negativos
+const POSITIVE = ['w_empty', 'to_w', 'ld_w', 'qnh', 'a_qnh', 'r_tas', 'r_burn', 'm_mtow', 'm_ramp', 'm_refw', 'm_lbgal', 'm_fuelmax', 'm_fwdKnee', 'to_len', 'ld_len'];
+// En blanco valen 0 (p. ej. "sin pasajeros atrás"); la pista y la dirección del viento solo importan si hay viento
+const BLANK_OK = ['w_front', 'w_rear', 'w_bagA', 'w_bagB', 'f_gal', 'wspd', 'a_wspd', 'r_dist', 'r_taxi', 'r_climb', 'm_refw'];
+const NEEDS_WIND = { rwy: 'wspd', wdir: 'wspd', a_rwy: 'a_wspd', a_wdir: 'a_wspd' };
+// Rangos físicamente razonables: atrapan errores de tipeo (p. ej. QNH 10013)
+const RANGE = { elev: [-1500, 20000], a_elev: [-1500, 20000], qnh: [850, 1100], a_qnh: [850, 1100], oat: [-60, 60], a_oat: [-60, 60], wspd: [0, 150], a_wspd: [0, 150], r_tas: [30, 300], r_wind: [-150, 150] };
+const DEP_IDS = ['elev', 'qnh', 'oat', 'rwy', 'wdir', 'wspd', 'to_w', 'to_len'], ARR_IDS = ['a_elev', 'a_qnh', 'a_oat', 'a_rwy', 'a_wdir', 'a_wspd', 'ld_w', 'ld_len'];
+let invalidMsg = '';
+
+function fieldName(e) {
+  let t = e.getAttribute && e.getAttribute('aria-label');
+  const l = e.closest && e.closest('label'), r = e.closest && e.closest('tr');
+  if (!t && l) t = [...l.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join(' ');
+  if (!t && r && r.cells) t = r.cells[0].textContent;
+  t = (t || e.id).replace(/\([^)]*\)/g, ' ').replace(/·.*$/, '').replace(/\s+/g, ' ').trim();
+  return t + (DEP_IDS.includes(e.id) ? ' (salida)' : ARR_IDS.includes(e.id) ? ' (llegada)' : '');
+}
+
+function validateInputs() {
+  const invalid = [];
+  document.querySelectorAll('input[type="number"]').forEach(e => {
+    const blank = e.value.trim() === '', v = Number(e.value);
+    const windFld = NEEDS_WIND[e.id];
+    const mayBeBlank = BLANK_OK.includes(e.id) || (windFld && !(num(windFld) > 0));
+    const [lo, hi] = RANGE[e.id] || [-Infinity, Infinity];
+    let bad = e.validity && e.validity.badInput;                    // texto que el navegador no puede leer como número
+    if (blank) bad = bad || !mayBeBlank;
+    else bad = bad || !Number.isFinite(v) || v < lo || v > hi
+      || (!SIGNED.includes(e.id) && v < 0) || (POSITIVE.includes(e.id) && v <= 0)
+      || (e.min !== '' && v < Number(e.min)) || (e.max !== '' && v > Number(e.max));
+    e.setAttribute('aria-invalid', String(!!bad));
+    if (bad) invalid.push(e);
+  });
+  const modelOK = LIM.mtow > LIM.fwdKnee && LIM.fwdMin <= LIM.fwdMax && LIM.fwdMax <= LIM.aft;
+  const routeOK = num('r_tas') > num('r_wind');
+  const ok = !invalid.length && !!TAKEOFF && !!LANDING && modelOK && routeOK;
+  if (invalid.length) {
+    const n = [...new Set(invalid.map(fieldName))];
+    invalidMsg = `Revisa ${n.slice(0, 3).join(', ')}${n.length > 3 ? ` y ${n.length - 3} más` : ''}: falta el valor o está fuera de rango.`;
+  } else if (!routeOK) invalidMsg = 'La velocidad suelo debe ser mayor que cero. Revisa TAS y viento en Combustible.';
+  else if (!modelOK) invalidMsg = 'Revisa los límites de peso y CG en la pestaña Avión.';
+  else if (!TAKEOFF || !LANDING) invalidMsg = 'Revisa las tablas de performance (pestaña Avión): al menos dos altitudes distintas, tres números por fila y distancia a 50 ft no menor al recorrido.';
+  else invalidMsg = '';
+  $('validation').hidden = ok;
+  $('validation').textContent = ok ? '' : invalidMsg + ' Los resultados están suspendidos.';
+  return ok;
+}
+
+const OUTPUT_IDS = ['wb_res', 'wb_msgs', 'chart', 'atm_out', 'a_atm_out', 'to_out', 'ld_out', 'to_fig', 'ld_fig', 'fuel_out'];
+function recalc() {
+  save();
+  readModel();
+  const ok = validateInputs();
+  document.querySelectorAll('[data-copy]').forEach(b => { b.disabled = !ok; });
+  if (!ok) {
+    OUTPUT_IDS.forEach(id => $(id).replaceChildren());
+    $('fuel_apply').disabled = true;
+    Object.keys(SUM).forEach(k => { SUM[k] = null; });
+    TOW = fuelNeeded = enrouteFuel = 0;
+    renderHome(false);
+    return;
+  }
+  calcWB(); calcPerf(); calcFuel(); renderHome();
+}
 
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-go],[data-tab]');
@@ -441,7 +525,9 @@ document.querySelector('[data-copy="ld"]').addEventListener('click', () => {
   recalc();
 });
 $('fuel_apply').addEventListener('click', () => {
-  $('f_gal').value = Math.min(Math.round(LIM.fuelMax / ff), Math.ceil((fuelNeeded + LIM.taxi) / ff));
+  // fuelNeeded ya incluye el rodaje; se redondea hacia arriba al 0,1 de la unidad elegida, sin pasar del tanque
+  const cap = Math.floor(LIM.fuelMax / ff * 10 + 1e-9) / 10;
+  $('f_gal').value = Math.min(cap, +(Math.ceil(fuelNeeded / ff * 10 - 1e-9) / 10).toFixed(1));
   recalc();
   go('wb');
 });
@@ -450,6 +536,13 @@ $('fuel_route_apply').addEventListener('click', () => {
   if (rt) { $('r_dist').value = Math.ceil(rt.nm); recalc(); }
 });
 $('go_plan').addEventListener('click', () => go('wb'));
+
+// Accesibilidad: cada campo de las tablas toma el nombre de su fila; los segmentos indican cuál está activo
+document.querySelectorAll('.grid input').forEach(e => {
+  const row = e.closest('tr');
+  if (row && row.cells[0]) e.setAttribute('aria-label', row.cells[0].textContent.replace(/\s+/g, ' ').trim() + (e.id === 'a_empty' ? ' · brazo (in)' : ''));
+});
+document.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-selected', String(b.classList.contains('on'))));
 
 load();
 curW = uw(); curF = uf();
