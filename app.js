@@ -4,25 +4,15 @@ const num = id => parseFloat($(id).value) || 0;
 const fmt = (n, d = 0) => n.toLocaleString('es', { maximumFractionDigits: d, minimumFractionDigits: d });
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
-// ---------- Datos del modelo (se leen de la pestaña "Avión") ----------
-let LIM = {}, TAKEOFF = [], LANDING = [];
+// ---------- Datos del modelo (vienen del POH, ver modelos.js) ----------
+const MODELS = window.MODELS || {};
+let MODEL = null, LIM = {};
 
-// Tabla de performance: altitud, recorrido en tierra, distancia a 50 ft (una fila por línea).
-// Se ignoran líneas en blanco y separadores sobrantes (p. ej. una coma al final). Cualquier otra
-// irregularidad devuelve null y la app suspende los resultados en vez de calcular con datos falsos.
-function parseTable(id) {
-  const rows = $(id).value.split('\n').map(l => l.trim()).filter(Boolean)
-    .map(l => l.split(/[,;\s]+/).filter(Boolean).map(Number))
-    .sort((a, b) => a[0] - b[0]);
-  const ok = rows.length >= 2 && rows.every((r, i) =>
-    r.length === 3 && r.every(Number.isFinite) && r[1] > 0 && r[2] >= r[1] && (!i || r[0] > rows[i - 1][0]));
-  return ok ? rows : null;
-}
 // ---------- Unidades ----------
 // Internamente todo se calcula en lb y galones US; los campos y resultados se muestran en la unidad elegida.
 const KG_PER_LB = 0.45359237, L_PER_GAL = 3.785411784;
-const WIDS = ['w_empty', 'w_front', 'w_rear', 'w_bagA', 'w_bagB', 'to_w', 'ld_w', 'm_mtow', 'm_ramp', 'm_bagAmax', 'm_bagBmax', 'm_bagTot', 'm_refw', 'm_fwdKnee'];
-const FIDS = ['f_gal', 'm_fuelmax', 'r_burn', 'r_taxi', 'r_climb'];
+const WIDS = ['w_empty', 'w_front', 'w_rear', 'w_bagA', 'w_bagB', 'to_w', 'ld_w'];
+const FIDS = ['f_gal', 'r_burn', 'r_taxi', 'r_climb'];
 let wf = 1, ff = 1;                 // display -> canónico (lb, gal)
 let curW = 'lb', curF = 'gal';      // unidad en la que están ahora los campos
 const uw = () => $('u_w').value, uf = () => $('u_f').value;
@@ -52,35 +42,67 @@ function onUnitChange() {
   recalc();
 }
 
+const tankOf = () => MODEL.tanks.find(t => t.id === $('m_tank').value) || MODEL.tanks[0];
 function readModel() {
   readUnits();
+  MODEL = MODELS[$('fl_model').value] || MODELS.c172s;
+  const m = MODEL, tank = tankOf();
   LIM = {
-    mtow: num('m_mtow') * wf, ramp: num('m_ramp') * wf, fuelMax: num('m_fuelmax') * ff, lbPerGal: num('m_lbgal') || 6,
-    fuelArm: num('m_arm_fuel'), front: num('m_arm_front'), rear: num('m_arm_rear'),
-    bagA: num('m_arm_bagA'), bagB: num('m_arm_bagB'),
-    bagAMax: num('m_bagAmax') * wf, bagBMax: num('m_bagBmax') * wf, bagTotal: num('m_bagTot') * wf,
-    fwdKnee: num('m_fwdKnee') * wf, fwdMin: num('m_fwdMin'), fwdMax: num('m_fwdMax'), aft: num('m_aft'),
-    refW: (num('m_refw') || num('m_mtow')) * wf, taxi: num('r_taxi') * ff, xw: num('m_xw')
+    mtow: m.w.mtow, ramp: m.w.ramp, mlw: m.w.mlw, fuelMax: tank.usable, lbPerGal: m.lbgal,
+    fuelArm: m.arms.fuel, front: m.arms.front, rear: m.arms.rear, bagA: m.arms.bagA, bagB: m.arms.bagB,
+    bagAMax: m.bag.A, bagBMax: m.bag.B, bagTotal: m.bag.tot,
+    fwdKnee: m.cg.knee, fwdMin: m.cg.fwdMin, fwdMax: m.cg.fwdMax, aft: m.cg.aft,
+    taxi: num('r_taxi') * ff, xw: m.v.xw
   };
-  TAKEOFF = parseTable('m_totab');
-  LANDING = parseTable('m_ldtab');
-  $('model_title').textContent = $('m_name').value;
   $('d_front').textContent = LIM.front; $('d_rear').textContent = LIM.rear;
   $('d_bagA').textContent = LIM.bagA; $('d_bagB').textContent = LIM.bagB; $('d_fuel').textContent = LIM.fuelArm;
-  $('m_bagA').textContent = num('m_bagAmax'); $('m_bagB').textContent = num('m_bagBmax'); $('m_fuel').textContent = num('m_fuelmax');
+  $('m_bagA').textContent = fmt(LIM.bagAMax / wf); $('m_bagB').textContent = fmt(LIM.bagBMax / wf);
+  $('m_fuel').textContent = fmt(LIM.fuelMax / ff, 1);
 }
 
-function interp(table, x, col) {
-  if (x <= table[0][0]) return table[0][col];
-  for (let i = 1; i < table.length; i++) {
-    if (x <= table[i][0]) {
-      const [x0, x1] = [table[i - 1][0], table[i][0]];
-      const t = (x - x0) / (x1 - x0);
-      return table[i - 1][col] + t * (table[i][col] - table[i - 1][col]);
-    }
+// ---------- Tablas del POH: altitud presión × temperatura × peso ----------
+// sheet.rows[pa/1000] = [recorrido, total a 50 ft] para 0, 10, 20, 30 y 40 °C; null = "---" (sin dato en el POH)
+// Interpolación bilineal dentro de cada hoja y lineal entre hojas de peso. Nunca se extrapola fuera de la tabla.
+function pohCell(sheet, pa, t, k) {
+  const i = Math.min(Math.floor(pa / 1000), 7), j = Math.min(Math.floor(t / 10), 3);
+  const fp = pa / 1000 - i, ft = t / 10 - j;
+  let sum = 0;
+  for (const [di, dj, wgt] of [[0, 0, (1 - fp) * (1 - ft)], [0, 1, (1 - fp) * ft], [1, 0, fp * (1 - ft)], [1, 1, fp * ft]]) {
+    if (wgt < 1e-9) continue;                           // esa celda no pesa: no importa si está vacía
+    const v = sheet.rows[i + di][2 * (j + dj) + k];
+    if (v == null) return null;
+    sum += wgt * v;
   }
-  const n = table.length, [a, b] = [table[n - 2], table[n - 1]];
-  return b[col] + (x - b[0]) * (b[col] - a[col]) / (b[0] - a[0]);
+  return sum;
+}
+function pohLookup(kind, pa, oat, w) {
+  const T = MODEL.perf[kind], sheets = T.sheets.slice().sort((a, b) => a.w - b.w);
+  const maxPA = MODEL.perf.pa[MODEL.perf.pa.length - 1], maxT = MODEL.perf.oat[MODEL.perf.oat.length - 1];
+  if (pa > maxPA + 1e-9 || oat > maxT + 1e-9)
+    return { out: `Fuera del rango de las tablas del POH (hasta ${fmt(maxPA)} ft de altitud presión y ${maxT} °C).` };
+  const notes = [];
+  let p = pa, t = oat;
+  if (p < 0) { p = 0; notes.push('Altitud presión bajo el nivel del mar: se usa la fila S.L. del POH (conservador).'); }
+  if (t < 0) { t = 0; notes.push('Temperatura bajo 0 °C: se usa la columna de 0 °C del POH (conservador).'); }
+  const first = sheets[0], last = sheets[sheets.length - 1];
+  let lo = first, hi = first, f = 0;
+  if (sheets.length === 1) {
+    if (w < first.w - 0.5) notes.push(`El POH publica esta tabla solo para ${dW(first.w)}: no hay corrección por peso (resultado conservador).`);
+  } else if (w <= first.w) {
+    if (w < first.w - 0.5) notes.push(`Peso bajo la hoja más liviana del POH (${dW(first.w)}): se usa esa hoja (conservador).`);
+  } else if (w >= last.w) {
+    lo = hi = last;
+    if (w > last.w + 0.5) notes.push(`Peso sobre el máximo de las tablas del POH (${dW(last.w)}).`);
+  } else {
+    const i = sheets.findIndex((s, n) => w > s.w && w <= sheets[n + 1].w);
+    lo = sheets[i]; hi = sheets[i + 1]; f = (w - lo.w) / (hi.w - lo.w);
+  }
+  const at = s => [pohCell(s, p, t, 0), pohCell(s, p, t, 1)];
+  const a = at(lo), b = f > 0 ? at(hi) : a;
+  if (a.includes(null) || b.includes(null))
+    return { out: 'Sin dato en el POH para estas condiciones (celda "---"): según el POH, ahí el rendimiento de ascenso es mínimo.' };
+  const mix = (x, y) => x + f * (y - x);
+  return { gr: mix(a[0], b[0]), d50: mix(a[1], b[1]), vr: lo.vr != null ? mix(lo.vr, hi.vr) : null, v50: mix(lo.v50, hi.v50), notes };
 }
 
 // ---------- Persistencia ----------
@@ -95,10 +117,12 @@ function save() {
   try { localStorage.setItem(KEY, JSON.stringify(o)); } catch (e) { /* sin almacenamiento */ }
 }
 function load() {
+  let o = {};
   try {
-    const o = JSON.parse(localStorage.getItem(KEY) || '{}');
-    for (const [k, v] of Object.entries(o)) if ($(k)) $(k).value = v;
+    o = JSON.parse(localStorage.getItem(KEY) || '{}') || {};
+    for (const [k, v] of Object.entries(o)) if (document.getElementById(k) && k !== 'm_tank') $(k).value = v;   // m_tank se restaura al armar sus opciones
   } catch (e) { /* ignorar */ }
+  return o;
 }
 
 // ---------- Peso y balance ----------
@@ -159,7 +183,7 @@ function calcWB() {
 function drawChart(points) {
   const W = 420, H = 340, L = 46, R = 12, T = 28, B = 56;
   const x0 = Math.floor(LIM.fwdMin) - 3, x1 = Math.ceil(LIM.aft) + 3;
-  const y0 = 1400, y1 = Math.ceil(LIM.mtow / 100) * 100 + 100;
+  const y0 = Math.floor(LIM.fwdKnee * 0.7 / 100) * 100, y1 = Math.ceil(LIM.mtow / 100) * 100 + 100;
   const X = v => L + (v - x0) / (x1 - x0) * (W - L - R);
   const Y = v => H - B - (v - y0) / (y1 - y0) * (H - T - B);
   const pts = p => p.map(q => X(q[0]).toFixed(1) + ',' + Y(q[1]).toFixed(1)).join(' ');
@@ -294,38 +318,63 @@ function calcPerf() {
   $('atm_out').innerHTML = atmKpis(aD);
   $('a_atm_out').innerHTML = atmKpis(aA);
 
-  // Despegue: condiciones del aeródromo de salida. (wf = factor de unidades de peso, windFactor = efecto del viento)
-  const wfT = windFactor(aD.head);
+  const notesHtml = (r, a) => [...(r.notes || []), ...(a.head < -10 ? ['Viento de cola de más de 10 kt: el POH solo cubre hasta 10 kt de cola; el resultado no es confiable.'] : [])]
+    .map(t => `<div class="msg warn">${t}</div>`).join('');
+
+  // Despegue: condiciones del aeródromo de salida. Tablas del POH (altitud presión × temperatura × peso)
+  // corregidas por viento y superficie según las notas del propio POH.
   const wT = num('to_w') * wf, sf = num('to_surf'), lenT = num('to_len');
-  const k = Math.pow(wT / LIM.refW, 2) * wfT;
-  const gr = interp(TAKEOFF, aD.da, 1) * k * sf;
-  const d50 = interp(TAKEOFF, aD.da, 2) * k + (sf - 1) * interp(TAKEOFF, aD.da, 1) * k;
-  const need = d50 * 1.25;
-  const okT = need <= lenT ? 'ok' : (d50 <= lenT ? 'warn' : 'bad');
-  $('to_out').innerHTML =
-    kpi('Recorrido de despegue', fmt(gr) + ' ft') +
-    kpi('Hasta 50 ft', fmt(d50) + ' ft', okT) +
-    kpi('Con margen 25 %', fmt(need) + ' ft', okT) +
-    kpi('Pista restante', fmt(lenT - need) + ' ft', okT) +
-    (wT > LIM.mtow ? kpi('¡Sobrepeso!', dW(wT - LIM.mtow), 'bad') : '');
-  drawRunway('to_fig', { kind: 'to', len: lenT, a: gr, b: d50, need, ok: okT, rwy: num('rwy') });
-  SUM.to = { need, len: lenT, ok: okT };
+  $('to_cond').textContent = `${MODEL.perf.to.flaps}, gas a fondo antes de soltar frenos`;
+  const rT = pohLookup('to', aD.pa, num('oat'), wT);
+  if (rT.out) {
+    $('to_out').innerHTML = kpi('Sin dato del POH', 'No disponible', 'bad');
+    $('to_notes').innerHTML = `<div class="msg bad">${rT.out}</div>`;
+    $('to_fig').innerHTML = '';
+    SUM.to = { ok: 'bad', out: rT.out };
+  } else {
+    const wfT = windFactor(aD.head);
+    const gr = rT.gr * wfT * sf;
+    const d50 = rT.d50 * wfT + (sf - 1) * rT.gr * wfT;
+    const need = d50 * 1.25;
+    const okT = need <= lenT ? 'ok' : (d50 <= lenT ? 'warn' : 'bad');
+    $('to_out').innerHTML =
+      kpi('Recorrido de despegue', fmt(gr) + ' ft') +
+      kpi('Hasta 50 ft', fmt(d50) + ' ft', okT) +
+      kpi('Con margen 25 %', fmt(need) + ' ft', okT) +
+      kpi('Pista restante', fmt(lenT - need) + ' ft', okT) +
+      kpi('Rotación / a 50 ft', `${fmt(rT.vr)} / ${fmt(rT.v50)} KIAS`) +
+      (wT > LIM.mtow ? kpi('¡Sobrepeso!', dW(wT - LIM.mtow), 'bad') : '');
+    $('to_notes').innerHTML = notesHtml(rT, aD);
+    drawRunway('to_fig', { kind: 'to', len: lenT, a: gr, b: d50, need, ok: okT, rwy: num('rwy') });
+    SUM.to = { need, len: lenT, ok: okT };
+  }
 
   // Aterrizaje: condiciones del aeródromo de llegada
-  const wfL = windFactor(aA.head);
   const wL = num('ld_w') * wf, sl = num('ld_surf'), lenL = num('ld_len');
-  const kl = (wL / LIM.refW) * wfL;
-  const lgr = interp(LANDING, aA.da, 1) * kl * sl;
-  const l50 = interp(LANDING, aA.da, 2) * kl + (sl - 1) * interp(LANDING, aA.da, 1) * kl;
-  const needL = l50 * 1.25;
-  const okL = needL <= lenL ? 'ok' : (l50 <= lenL ? 'warn' : 'bad');
-  $('ld_out').innerHTML =
-    kpi('Recorrido de aterrizaje', fmt(lgr) + ' ft') +
-    kpi('Desde 50 ft', fmt(l50) + ' ft', okL) +
-    kpi('Con margen 25 %', fmt(needL) + ' ft', okL) +
-    kpi('Pista restante', fmt(lenL - needL) + ' ft', okL);
-  drawRunway('ld_fig', { kind: 'ld', len: lenL, a: Math.max(0, l50 - lgr), b: l50, need: needL, ok: okL, rwy: num('a_rwy') });
-  SUM.ld = { need: needL, len: lenL, ok: okL };
+  $('ld_cond').textContent = `${MODEL.perf.ld.flaps}, motor al ralentí, frenado máx.`;
+  const rL = pohLookup('ld', aA.pa, num('a_oat'), wL);
+  if (rL.out) {
+    $('ld_out').innerHTML = kpi('Sin dato del POH', 'No disponible', 'bad');
+    $('ld_notes').innerHTML = `<div class="msg bad">${rL.out}</div>`;
+    $('ld_fig').innerHTML = '';
+    SUM.ld = { ok: 'bad', out: rL.out };
+  } else {
+    const wfL = windFactor(aA.head);
+    const lgr = rL.gr * wfL * sl;
+    const l50 = rL.d50 * wfL + (sl - 1) * rL.gr * wfL;
+    const needL = l50 * 1.25;
+    const okL = needL <= lenL ? 'ok' : (l50 <= lenL ? 'warn' : 'bad');
+    $('ld_out').innerHTML =
+      kpi('Recorrido de aterrizaje', fmt(lgr) + ' ft') +
+      kpi('Desde 50 ft', fmt(l50) + ' ft', okL) +
+      kpi('Con margen 25 %', fmt(needL) + ' ft', okL) +
+      kpi('Pista restante', fmt(lenL - needL) + ' ft', okL) +
+      kpi('Velocidad a 50 ft', fmt(rL.v50) + ' KIAS') +
+      (wL > LIM.mlw ? kpi('¡Sobre peso máx. de aterrizaje!', dW(wL - LIM.mlw), 'bad') : '');
+    $('ld_notes').innerHTML = notesHtml(rL, aA);
+    drawRunway('ld_fig', { kind: 'ld', len: lenL, a: Math.max(0, l50 - lgr), b: l50, need: needL, ok: okL, rwy: num('a_rwy') });
+    SUM.ld = { need: needL, len: lenL, ok: okL };
+  }
 }
 
 // ---------- Combustible ----------
@@ -362,7 +411,7 @@ function setRow(id, cls, title, text) {
   r.querySelector('b').textContent = title;
   r.querySelector('small').textContent = text;
 }
-const fitText = o => o.ok === 'ok' ? `Con margen del 25 %: ${fmt(o.need)} ft de ${fmt(o.len)} ft disponibles`
+const fitText = o => o.out ? o.out : o.ok === 'ok' ? `Con margen del 25 %: ${fmt(o.need)} ft de ${fmt(o.len)} ft disponibles`
   : o.ok === 'warn' ? `Sin el margen del 25 %: pide ${fmt(o.need)} ft, hay ${fmt(o.len)} ft`
   : `No cabe: pide ${fmt(o.need)} ft, hay ${fmt(o.len)} ft`;
 
@@ -387,7 +436,7 @@ function renderHome(valid = true) {
   $('fuel_route').hidden = !rt;
   if (rt) $('fuel_route_txt').textContent = `${f.i} → ${t.i}: ${fmt(rt.nm)} NM en línea recta`;
 
-  $('model_specs').textContent = `MTOW ${dW(LIM.mtow)} · ${dF(LIM.fuelMax, 0)} utilizables`;
+  $('model_specs').textContent = `MTOW ${dW(LIM.mtow)} · ${dF(LIM.fuelMax, 0)} utilizables · Fuente: ${MODEL.poh}`;
 
   if (!valid) {
     setRow('sum_wb', 'warn', 'Peso y balance', invalidMsg);
@@ -411,6 +460,100 @@ function renderHome(valid = true) {
         : short ? `Cargado ${dF(fu.have)}, necesitas ${dF(fu.need)}`
         : `Cargado ${dF(fu.have)} · necesitas ${dF(fu.need)} con reserva`);
   }
+}
+
+// ---------- Modelo: selector y vistas de solo lectura ----------
+// Todo sale de MODELS (modelos.js), transcrito del POH de cada modelo. No hay datos inventados en la app.
+const MODEL_ORDER = ['c172s', 'c172r', 'c172p', 'c172n', 'c172m'];
+const lbkg = lb => `${fmt(lb)} lb (${fmt(lb * KG_PER_LB)} kg)`;
+const tbl = rows => `<table class="grid ro"><tbody>${rows.filter(r => r[1] != null && r[1] !== '')
+  .map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('')}</tbody></table>`;
+
+// Cambia de modelo. reset = true precarga los ejemplos del POH (peso vacío, brazo y cargas típicas).
+function setModel(id, reset, tankId) {
+  if (!MODELS[id]) id = MODEL_ORDER.find(k => MODELS[k]);
+  $('fl_model').value = id;
+  MODEL = MODELS[id];
+  const sel = $('m_tank');
+  sel.innerHTML = MODEL.tanks.map(t => `<option value="${t.id}">${t.label}</option>`).join('');
+  sel.value = MODEL.tanks.some(t => t.id === tankId) ? tankId : MODEL.tanks[0].id;
+  $('tank_row').hidden = MODEL.tanks.length < 2;
+  readModel();
+  if (reset) {
+    const w = lb => +(lb / wf).toFixed(wf === 1 ? 0 : 1), g = gal => +(gal / ff).toFixed(ff === 1 ? 0 : 1);
+    $('w_empty').value = w(MODEL.empty.w);
+    $('a_empty').value = MODEL.empty.arm;
+    $('to_w').value = w(Math.round(MODEL.w.mtow * 0.94 / 10) * 10);
+    $('ld_w').value = w(Math.round(MODEL.w.mtow * 0.86 / 10) * 10);
+    $('f_gal').value = g(Math.round(LIM.fuelMax * 0.75));
+  }
+  renderModelUI();
+  renderModelViews();
+}
+
+function renderModelUI() {
+  $('model_list').innerHTML = MODEL_ORDER.filter(k => MODELS[k]).map(k => {
+    const m = MODELS[k], on = m === MODEL;
+    return `<button type="button" class="model${on ? ' on' : ''}" role="radio" aria-checked="${on}" data-model="${k}">
+      <span class="mico"><svg class="ic" aria-hidden="true"><use href="#i-plane"/></svg></span>
+      <span class="mtxt"><b>${m.nombre}</b><small>${m.sub}</small></span>
+      <span class="check" aria-hidden="true">✔</span></button>`;
+  }).join('') + '<div class="model soon"><span>Más modelos (K, L, Q…) próximamente, a medida que se carguen sus POH</span></div>';
+  $('empty_note').textContent = `Peso vacío y brazo precargados con el ejemplo del POH (${MODEL.empty.nota.replace(/^Ejemplo del POH: /, '')}). Reemplázalos por los de la hoja de peso y balance de tu matrícula.`;
+}
+
+function sheetTable(sh, m) {
+  const head = `<tr><th rowspan="2">Alt. presión (ft)</th>${m.perf.oat.map(t => `<th colspan="2">${t} °C</th>`).join('')}</tr>` +
+    `<tr>${m.perf.oat.map(() => '<th>Suelo</th><th>50 ft</th>').join('')}</tr>`;
+  const body = m.perf.pa.map((pa, i) => `<tr><th>${pa === 0 ? 'S.L.' : fmt(pa)}</th>${sh.rows[i].map(x => `<td>${x == null ? '—' : fmt(x)}</td>`).join('')}</tr>`).join('');
+  return `<div class="tscroll"><table class="ptab"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+}
+
+function renderModelViews() {
+  const m = MODEL, v = m.v, w = m.w;
+  const kias = x => `${x} KIAS`, byW = (a, b) => b.w - a.w;
+  const speeds = [
+    ...m.perf.to.sheets.slice().sort(byW).map(s => [`Despegue a ${lbkg(s.w)}`, s.vr != null ? `Rotación ${kias(s.vr)} · a 50 ft ${kias(s.v50)}` : `a 50 ft ${kias(s.v50)}`]),
+    ['V<sub>X</sub> mejor ángulo de ascenso', `${kias(v.vx[0])} a nivel del mar · ${kias(v.vx[1])} a 10 000 ft`],
+    ['V<sub>Y</sub> mejor régimen de ascenso', `${kias(v.vy[0])} a nivel del mar · ${kias(v.vy[1])} a 10 000 ft`],
+    ['Ascenso normal', kias(v.climbOut)],
+    ['Aproximación normal, flaps arriba', kias(v.appUp)],
+    [`Aproximación normal, flaps ${v.flapsLD}°`, kias(v.appFlaps)],
+    ['Aproximación de pista corta', kias(v.appShort)],
+    ['Aproximación frustrada (ascenso)', kias(v.balked)],
+    ...m.perf.ld.sheets.slice().sort(byW).map(s => [`Aterrizaje a ${lbkg(s.w)}`, `a 50 ft ${kias(s.v50)}`]),
+    ['V<sub>FE</sub> máx. con flaps', v.vfe.map(([l, k]) => l ? `${kias(k)} (flaps ${l})` : kias(k)).join(' · ')],
+    ['V<sub>A</sub> maniobra', v.va.map(([lb, k]) => `${kias(k)} a ${fmt(lb)} lb`).join(' · ')],
+    ['V<sub>NO</sub> crucero estructural máx.', kias(v.vno)],
+    ['V<sub>NE</sub> nunca exceder', kias(v.vne)],
+    ['V<sub>S1</sub> pérdida, flaps arriba (inicio del arco verde)', kias(v.vs1)],
+    ['V<sub>S0</sub> pérdida, flaps abajo (inicio del arco blanco)', kias(v.vs0)],
+    ['Viento cruzado demostrado', `${v.xw} kt`]
+  ];
+  $('spd_view').innerHTML = `<div class="card"><h2>Velocidades <small>${m.nombre}</small></h2>${tbl(speeds)}
+    <p class="hint">KIAS, tal como las publica el POH (${m.poh}). Solo lectura.</p></div>`;
+
+  const lim = [
+    ['Peso máx. de despegue (MTOW)', lbkg(w.mtow)], ['Peso máx. en rampa', lbkg(w.ramp)], ['Peso máx. de aterrizaje', lbkg(w.mlw)],
+    ['Equipaje zona A', `${lbkg(m.bag.A)} · brazo ${m.arms.bagA} in`], ['Equipaje zona B', `${lbkg(m.bag.B)} · brazo ${m.arms.bagB} in`],
+    ['Equipaje total máx.', lbkg(m.bag.tot)],
+    ['Asientos delanteros', `brazo ${m.arms.front} in`], ['Asientos traseros', `brazo ${m.arms.rear} in`],
+    ['Combustible', `${m.lbgal} lb/gal · brazo ${m.arms.fuel} in`],
+    ...m.tanks.map(t => [t.label.split(' · ')[0], `${t.usable} gal US utilizables (${fmt(t.usable * L_PER_GAL)} L) · ${t.total} gal totales`]),
+    ['CG límite delantero', `${fmt(m.cg.fwdMin, 1)} in hasta ${fmt(m.cg.knee)} lb; sube en línea recta hasta ${fmt(m.cg.fwdMax, 1)} in a ${fmt(w.mtow)} lb`],
+    ['CG límite trasero', `${fmt(m.cg.aft, 1)} in a cualquier peso`],
+    ['Peso vacío de ejemplo', `${lbkg(m.empty.w)} · brazo ${fmt(m.empty.arm, 2)} in`]
+  ];
+  $('lim_view').innerHTML = `<div class="card"><h2>Pesos, brazos y CG <small>${m.nombre}</small></h2>${tbl(lim)}
+    <p class="hint">${m.empty.nota}. El peso vacío de <b>tu matrícula</b> está en su hoja de peso y balance: ingrésalo en la pestaña Peso. Fuente: ${m.poh}. Solo lectura.</p></div>`;
+
+  const part = (titulo, T, extra) => `<div class="card"><h2>${titulo} <small>${T.flaps} · ${T.fuente}</small></h2>` +
+    T.sheets.slice().sort(byW).map(s => `<p class="sub">${lbkg(s.w)}${s.vr != null ? ` · rotación ${kias(s.vr)}` : ''} · a 50 ft ${kias(s.v50)}</p>${sheetTable(s, m)}`).join('') +
+    `<p class="hint">${extra}</p></div>`;
+  $('tab_view').innerHTML =
+    `<p class="hint nomargin">Tablas del POH (${m.poh}), en pies. <b>Suelo</b> = recorrido en tierra; <b>50 ft</b> = distancia total hasta/desde 50 ft de altura. "—" = el POH no da dato. Compáralas con tu ejemplar del POH.</p>` +
+    part('Despegue', m.perf.to, 'Pista pavimentada, nivelada, seca, viento calmo. La app corrige por viento según el POH (−10 % por cada 9 kt de frente; +10 % por cada 2 kt de cola, hasta 10 kt) y por hierba seca (+' + fmt(m.perf.grass.to * 100) + ' % del recorrido en tierra).') +
+    part('Aterrizaje', m.perf.ld, 'Pista pavimentada, nivelada, seca, viento calmo, frenado máximo. La app corrige por viento según el POH y por hierba seca (+' + fmt(m.perf.grass.ld * 100) + ' % del recorrido en tierra).');
 }
 
 // ---------- Navegación ----------
@@ -442,9 +585,9 @@ function go(tab, open) {
 // ---------- Validación ----------
 // Si falta un dato o es imposible, se suspenden los resultados: es mejor no mostrar nada que un número falso.
 const SIGNED = ['elev', 'a_elev', 'oat', 'a_oat', 'r_wind'];                       // pueden ser negativos
-const POSITIVE = ['w_empty', 'to_w', 'ld_w', 'qnh', 'a_qnh', 'r_tas', 'r_burn', 'm_mtow', 'm_ramp', 'm_refw', 'm_lbgal', 'm_fuelmax', 'm_fwdKnee', 'to_len', 'ld_len'];
+const POSITIVE = ['w_empty', 'to_w', 'ld_w', 'qnh', 'a_qnh', 'r_tas', 'r_burn', 'to_len', 'ld_len'];
 // En blanco valen 0 (p. ej. "sin pasajeros atrás"); la pista y la dirección del viento solo importan si hay viento
-const BLANK_OK = ['w_front', 'w_rear', 'w_bagA', 'w_bagB', 'f_gal', 'wspd', 'a_wspd', 'r_dist', 'r_taxi', 'r_climb', 'm_refw'];
+const BLANK_OK = ['w_front', 'w_rear', 'w_bagA', 'w_bagB', 'f_gal', 'wspd', 'a_wspd', 'r_dist', 'r_taxi', 'r_climb'];
 const NEEDS_WIND = { rwy: 'wspd', wdir: 'wspd', a_rwy: 'a_wspd', a_wdir: 'a_wspd' };
 // Rangos físicamente razonables: atrapan errores de tipeo (p. ej. QNH 10013)
 const RANGE = { elev: [-1500, 20000], a_elev: [-1500, 20000], qnh: [850, 1100], a_qnh: [850, 1100], oat: [-60, 60], a_oat: [-60, 60], wspd: [0, 150], a_wspd: [0, 150], r_tas: [30, 300], r_wind: [-150, 150] };
@@ -475,22 +618,19 @@ function validateInputs() {
     e.setAttribute('aria-invalid', String(!!bad));
     if (bad) invalid.push(e);
   });
-  const modelOK = LIM.mtow > LIM.fwdKnee && LIM.fwdMin <= LIM.fwdMax && LIM.fwdMax <= LIM.aft;
   const routeOK = num('r_tas') > num('r_wind');
-  const ok = !invalid.length && !!TAKEOFF && !!LANDING && modelOK && routeOK;
+  const ok = !invalid.length && !!MODEL && routeOK;
   if (invalid.length) {
     const n = [...new Set(invalid.map(fieldName))];
     invalidMsg = `Revisa ${n.slice(0, 3).join(', ')}${n.length > 3 ? ` y ${n.length - 3} más` : ''}: falta el valor o está fuera de rango.`;
   } else if (!routeOK) invalidMsg = 'La velocidad suelo debe ser mayor que cero. Revisa TAS y viento en Combustible.';
-  else if (!modelOK) invalidMsg = 'Revisa los límites de peso y CG en la pestaña Avión.';
-  else if (!TAKEOFF || !LANDING) invalidMsg = 'Revisa las tablas de performance (pestaña Avión): al menos dos altitudes distintas, tres números por fila y distancia a 50 ft no menor al recorrido.';
   else invalidMsg = '';
   $('validation').hidden = ok;
   $('validation').textContent = ok ? '' : invalidMsg + ' Los resultados están suspendidos.';
   return ok;
 }
 
-const OUTPUT_IDS = ['wb_res', 'wb_msgs', 'chart', 'atm_out', 'a_atm_out', 'to_out', 'ld_out', 'to_fig', 'ld_fig', 'fuel_out'];
+const OUTPUT_IDS = ['wb_res', 'wb_msgs', 'chart', 'atm_out', 'a_atm_out', 'to_out', 'ld_out', 'to_fig', 'ld_fig', 'to_notes', 'ld_notes', 'fuel_out'];
 function recalc() {
   save();
   readModel();
@@ -518,6 +658,18 @@ document.querySelectorAll('.seg').forEach(seg => seg.addEventListener('click', e
 document.querySelectorAll(FIELDS).forEach(e => { if (e.id !== 'u_w' && e.id !== 'u_f') e.addEventListener('input', recalc); });
 $('u_w').addEventListener('change', onUnitChange);
 $('u_f').addEventListener('change', onUnitChange);
+$('model_list').addEventListener('click', e => {
+  const b = e.target.closest('[data-model]');
+  if (!b || b.dataset.model === MODEL.id) return;
+  setModel(b.dataset.model, true);
+  recalc();
+});
+$('m_tank').addEventListener('change', () => {
+  readModel();
+  // si cambió a un tanque más chico, el combustible cargado no puede quedar sobre su capacidad
+  if (num('f_gal') * ff > LIM.fuelMax) $('f_gal').value = +(LIM.fuelMax / ff).toFixed(1);
+  recalc();
+});
 document.querySelector('[data-copy="to"]').addEventListener('click', () => { $('to_w').value = Math.round(TOW / wf); recalc(); });
 // Peso de aterrizaje = peso de despegue menos el combustible de la ruta (ruta + ascenso extra)
 document.querySelector('[data-copy="ld"]').addEventListener('click', () => {
@@ -544,6 +696,9 @@ document.querySelectorAll('.grid input').forEach(e => {
 });
 document.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-selected', String(b.classList.contains('on'))));
 
-load();
+const saved = load();
 curW = uw(); curF = uf();
+readUnits();
+// Primera vez (o si no había modelo guardado): se precargan los ejemplos del POH. Si no, se respetan los datos guardados.
+setModel($('fl_model').value || 'c172s', !saved.fl_model, saved.m_tank);
 recalc();
