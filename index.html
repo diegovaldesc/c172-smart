@@ -225,13 +225,29 @@
       <tbody id="wb_res"></tbody>
     </table>
     <div id="wb_msgs"></div>
-    <svg id="chart" class="fig" viewBox="0 0 420 340" role="img" aria-label="Envolvente de centro de gravedad"></svg>
+    <svg id="chart" class="fig" viewBox="0 0 420 396" role="img" aria-label="Envolvente de centro de gravedad"></svg>
   </div>
 </section>
 
 <!-- ============ PERFORMANCE ============ -->
 <section id="perf" class="tab">
   <div class="pagehead"><h1>Performance</h1><p>Despegue y aterrizaje con las tablas del POH: altitud presión, temperatura, peso, viento y superficie.</p></div>
+  <div class="card margincard">
+    <label>Margen de seguridad sobre la pista
+      <select id="p_margin">
+        <option value="0">Sin margen (solo el valor del POH)</option>
+        <option value="10">+10 %</option>
+        <option value="15">+15 %</option>
+        <option value="25" selected>+25 % (recomendado)</option>
+        <option value="50">+50 % (muy conservador)</option>
+      </select></label>
+    <details class="why">
+      <summary>¿Por qué se suma un margen?</summary>
+      <p>Las tablas del POH se midieron con un avión nuevo, motor en perfecto estado, técnica de piloto de pruebas y pista ideal (pavimentada, seca y plana). Un avión con horas de uso, una técnica menos fina, un viento mal estimado o una pista algo distinta rara vez repiten esas cifras.</p>
+      <p>Por eso se suma un porcentaje a la <b>distancia total hasta/desde 50 ft</b> (no solo al recorrido en tierra). Es una práctica de seguridad habitual entre instructores y escuelas, <b>no un valor del POH</b>: el POH no exige ningún margen. Puedes subirlo o bajarlo aquí; con «Sin margen» ves exactamente lo que dice el POH.</p>
+    </details>
+  </div>
+
   <div class="seg" id="perf_seg" role="tablist">
     <button type="button" class="on" data-sub="perf_dep" role="tab">Salida <small id="seg_dep"></small></button>
     <button type="button" data-sub="perf_arr" role="tab">Llegada <small id="seg_arr"></small></button>
@@ -336,12 +352,12 @@
       <svg id="ld_fig" class="fig" viewBox="0 0 480 190" role="img" aria-label="Pista y recorrido de aterrizaje"></svg>
     </div>
   </div>
-  <p class="hint">Interpolación entre los valores de las tablas del POH (pestaña Avión → Tablas), sin extrapolar fuera de ellas. Viento y hierba seca siguen las notas del POH; "mojado" es una estimación propia, no un dato del POH. El margen del 25 % es una práctica recomendada, no un valor del POH. Cruce sobre el umbral a 50 ft.</p>
+  <p class="hint">Interpolación entre los valores de las tablas del POH (pestaña Avión → Tablas), sin extrapolar fuera de ellas. Viento y hierba seca siguen las notas del POH; "mojado" es una estimación propia, no un dato del POH. El margen de seguridad es una práctica recomendada, no un valor del POH. Cruce sobre el umbral a 50 ft.</p>
 </section>
 
 <!-- ============ COMBUSTIBLE ============ -->
 <section id="fuel" class="tab">
-  <div class="pagehead"><h1>Combustible</h1><p>Tiempo en ruta, consumo y reservas.</p></div>
+  <div class="pagehead"><h1>Combustible</h1><p>Ascenso, crucero y reserva con las tablas del POH: tiempo, combustible y alcance.</p></div>
   <div class="card">
     <h2>Planificador de ruta</h2>
     <div class="routebox" id="fuel_route" hidden>
@@ -350,22 +366,43 @@
     </div>
     <div class="form">
       <label>Distancia (NM)<input id="r_dist" type="number" value="120"></label>
-      <label>TAS crucero (kt)<input id="r_tas" type="number" value="105"></label>
       <label>Viento de frente (+) / cola (−) (kt)<input id="r_wind" type="number" value="0"></label>
-      <label>Consumo crucero (<span class="uf">gal</span>/h)<input id="r_burn" type="number" step="0.1" value="8.5"></label>
-      <label>Rodaje + despegue (<span class="uf">gal</span>)<input id="r_taxi" type="number" step="0.1" value="1.4"></label>
-      <label>Ascenso extra (<span class="uf">gal</span>)<input id="r_climb" type="number" step="0.1" value="1.5"></label>
       <label>Reserva
         <select id="r_res">
           <option value="30">30 min (VFR día)</option>
           <option value="45">45 min (VFR noche)</option>
           <option value="60">60 min (prudente)</option>
         </select></label>
+      <label>Rodaje + despegue (<span class="uf">gal</span>)<input id="r_taxi" type="number" step="0.1" value="1.4"></label>
     </div>
+    <p class="hint" id="taxi_poh"></p>
+
+    <h3 class="subhead">Ascenso y crucero</h3>
+    <div class="form">
+      <label>Datos de ascenso y crucero
+        <select id="r_mode">
+          <option value="poh">Tablas del POH</option>
+          <option value="man">Manual (mis valores)</option>
+        </select></label>
+    </div>
+    <div class="form" id="r_poh_f">
+      <label>Altitud de crucero (ft, altitud presión)<input id="r_alt" type="number" step="500" value="6000"></label>
+      <label>RPM<input id="r_rpm" type="number" step="50" value="2400"></label>
+      <label>Temperatura vs. ISA (°C)<input id="r_isa" type="number" step="1" value="0"></label>
+    </div>
+    <p class="hint" id="r_poh_info"></p>
+    <div class="form" id="r_man_f" hidden>
+      <label>TAS crucero (kt)<input id="r_tas" type="number" value="105"></label>
+      <label>Consumo crucero (<span class="uf">gal</span>/h)<input id="r_burn" type="number" step="0.1" value="8.5"></label>
+      <label>Combustible de ascenso (<span class="uf">gal</span>)<input id="r_climb" type="number" step="0.1" value="1.5"></label>
+    </div>
+
+    <div id="fuel_msg"></div>
+    <div class="phwrap"><table id="fuel_tbl" class="grid phases"></table></div>
     <div id="fuel_out" class="kpis"></div>
     <button id="fuel_apply" class="primary">Usar este combustible en Peso y balance</button>
+    <p class="hint" id="fuel_note"></p>
   </div>
-  <p class="hint">TAS y consumo son valores de ejemplo, no del POH: ajústalos a tu avión, altitud y técnica de crucero (las tablas de crucero aún no están cargadas).</p>
 </section>
 
 <!-- ============ AVIÓN (velocidades, modelo, tablas) ============ -->

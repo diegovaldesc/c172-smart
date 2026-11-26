@@ -2,12 +2,12 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const html=fs.readFileSync(__dirname+'/index.html','utf8');
 const nodes=new Map();
-function node(id,value=''){return {id,value,min:'',max:'',hidden:false,disabled:false,dataset:{},classList:{contains:()=>false,toggle(){}},setAttribute(k,v){this[k]=v},removeAttribute(k){delete this[k]},addEventListener(k,v){(this.events??={})[k]=v},querySelector(){return node('child')},querySelectorAll(){return []},replaceChildren(){this.innerHTML=''},innerHTML:'',textContent:''};}
-for(const m of html.matchAll(/<(input|select|textarea|div|svg|button|span|b|small|p|tbody|td|section|em|label)[^>]*\bid="([^"]+)"[^>]*>/g)){
+function node(id,value=''){return {id,value,min:'',max:'',hidden:false,disabled:false,dataset:{},classList:{contains:()=>false,toggle(){}},setAttribute(k,v){this[k]=v},removeAttribute(k){delete this[k]},addEventListener(k,v){(this.events??={})[k]=v},querySelector(){return node('child')},closest(q){const man=['r_tas','r_burn','r_climb'],poh=['r_alt','r_rpm','r_isa'];if(q!=='[hidden]')return null;return (man.includes(this.id)&&nodes.get('r_man_f').hidden)||(poh.includes(this.id)&&nodes.get('r_poh_f').hidden)?this:null},querySelectorAll(){return []},replaceChildren(){this.innerHTML=''},innerHTML:'',textContent:''};}
+for(const m of html.matchAll(/<(input|select|textarea|div|svg|button|span|b|small|p|table|tbody|td|section|em|label)[^>]*\bid="([^"]+)"[^>]*>/g)){
  const n=node(m[2],m[0].match(/\bvalue="([^"]*)"/)?.[1]||'');n.type=m[0].match(/\btype="([^"]*)"/)?.[1];
  n.min=m[0].match(/\bmin="([^"]*)"/)?.[1]??'';n.max=m[0].match(/\bmax="([^"]*)"/)?.[1]??'';
  if(m[1]==='textarea')n.value=html.slice(m.index+m[0].length).split('</textarea>')[0];
- if(m[1]==='select')n.value=html.slice(m.index+m[0].length).split('</select>')[0].match(/value="([^"]*)"/)?.[1]||'';
+ if(m[1]==='select'){const body=html.slice(m.index+m[0].length).split('</select>')[0];n.value=body.match(/value="([^"]*)"[^>]*\bselected/)?.[1]??body.match(/value="([^"]*)"/)?.[1]??'';}
  let storedValue=n.value; Object.defineProperty(n,"value",{get(){return storedValue},set(v){storedValue=String(v)}}); nodes.set(n.id,n);
 }
 const actions=new Map();
@@ -85,18 +85,19 @@ assert.equal(run('validateInputs()'),true);
 assert(Number.isFinite(run('fuelNeeded')));
 const need=run('fuelNeeded');nodes.get('fuel_apply').events.click();
 assert(+nodes.get('f_gal').value>=need && +nodes.get('f_gal').value<need+.101,'apply total once');
+set('r_mode','man');run('recalc()');
 set('r_burn',0);run('recalc()');assert.equal(nodes.get('fuel_apply').disabled,true);assert.equal(nodes.get('fuel_out').innerHTML,'');
 set('r_burn',8.5);set('r_wind',105);run('recalc()');assert.equal(run('validateInputs()'),false);
 set('r_wind',0);set('w_front',-1);run('recalc()');assert.equal(run('validateInputs()'),false);
 set('w_front',340);set('qnh','');run('recalc()');assert.equal(run('validateInputs()'),false);set('qnh',1013);
-set('r_dist',10000);run('recalc()');assert.equal(nodes.get('fuel_apply').disabled,true);set('r_dist',120);run('recalc()');
+set('r_dist',10000);run('recalc()');assert.equal(nodes.get('fuel_apply').disabled,true);set('r_dist',120);set('r_mode','poh');run('recalc()');
 set('f_gal',.5);run('recalc()');assert.equal(run('SUM.wb.ok'),false);set('f_gal',40);
 set('u_w','kg');set('u_f','L');run('onUnitChange()');assert.equal(run('validateInputs()'),true);nodes.get('fuel_apply').events.click();assert(run("num('f_gal') * ff + 1e-9 >= fuelNeeded"));assert(run("num('f_gal') * ff <= LIM.fuelMax"));
 assert(!/NaN|Infinity/.test(nodes.get('to_fig').innerHTML));
 
 const reset = () => { set('u_w','lb'); set('u_f','gal'); run('onUnitChange()'); };
 reset();
-set('w_front',340); set('w_rear',0); set('f_gal',40); set('a_empty','38.12'); set('qnh',1013); set('r_dist',120); set('r_wind',0); set('r_burn',8.5); run('recalc()');
+set('w_front',340); set('w_rear',0); set('f_gal',40); set('a_empty','38.12'); set('qnh',1013); set('r_dist',120); set('r_wind',0); set('r_burn',8.5); set('r_mode','poh'); run('recalc()');
 assert.equal(run('validateInputs()'), true, 'estado base válido');
 // Campos opcionales en blanco valen 0 (sin pasajeros atrás, sin equipaje, sin viento)
 set('w_rear',''); set('w_bagA',''); set('wspd',''); set('r_climb',''); run('recalc()');
@@ -156,6 +157,86 @@ assert(/Fuera del rango/.test(nodes.get('to_notes').innerHTML));assert(/Fuera de
 assert.notEqual(run('SUM.wb'),null);assert.notEqual(nodes.get('ld_fig').innerHTML,'');
 set('elev',0);set('oat',45);run('recalc()');assert(run('SUM.to.out'),'OAT 45 °C: fuera de tabla');set('oat',15);run('recalc()');assert.equal(run('SUM.to.out'),undefined);
 
+
+// ---------------------------------------------------------------- margen de seguridad seleccionable
+set('elev',0);set('qnh',1013.25);set('oat',15);set('to_w',2400);set('to_surf',1);set('wspd',0);set('to_len',3000);set('wdir',270);
+assert.equal(nodes.get('p_margin').value,'25','margen por defecto 25 %');
+for(const [m,k] of [[0,1],[10,1.1],[15,1.15],[25,1.25],[50,1.5]]){
+  set('p_margin',m);run('recalc()');
+  near(run('SUM.to.need'),k*1420,1e-6,'margen '+m+' %');near(run('SUM.ld.need'),k*1335,1e-6,'margen aterrizaje '+m+' %');
+  assert(m===0?/Sin margen/.test(nodes.get('to_out').innerHTML)&&/Necesario/.test(nodes.get('to_fig').innerHTML):new RegExp('Con margen '+m+' %').test(nodes.get('to_out').innerHTML)&&new RegExp('\\+'+m+' %').test(nodes.get('to_fig').innerHTML),'rótulos del margen '+m);
+}
+set('p_margin',0);run('recalc()');assert(/Cabe según el POH/.test(run('fitText(SUM.to)')),'sin margen: texto del resumen');
+set('p_margin',25);run('recalc()');assert(/Con margen del 25 %/.test(run('fitText(SUM.to)')));
+
+// ---------------------------------------------------------------- crucero y ascenso del POH
+const cr=(model,pa,rpm,dev)=>JSON.parse(run('(()=>{const keep=MODEL;MODEL=MODELS.'+model+';try{return JSON.stringify(cruiseAt('+pa+','+rpm+','+dev+'))}finally{MODEL=keep}})()'));
+const cl=(model,from,to,dev)=>JSON.parse(run('(()=>{const keep=MODEL;MODEL=MODELS.'+model+';try{return JSON.stringify(climbBetween('+from+','+to+','+dev+'))}finally{MODEL=keep}})()'));
+// 1) cada celda impresa en el POH se recupera exacta (altitud × RPM × columna de temperatura); "---" => sin dato
+for(const [id,m] of Object.entries(MODELS)){
+  assert(m.cruise.w>0&&m.climb.w>0&&m.climb.allow>0&&m.cruise.alts.length===6&&m.climb.rows.length===13,id+' tablas de crucero y ascenso completas');
+  for(const a of m.cruise.alts)for(const row of a.rows)for(let c=1;c<=3;c++){
+    const dev=(c-2)*20,cell=row[c],got=cr(id,a.pa,row[0],dev);
+    if(cell===null)assert(got.out&&/---/.test(got.out),id+' '+a.pa+' '+row[0]+' dev'+dev+': celda "---" => sin dato');
+    else assert.deepEqual([got.bhp,got.tas,got.gph].map(x=>+x.toFixed(6)),cell,id+' '+a.pa+' ft '+row[0]+' RPM dev '+dev);
+  }
+  for(const r of m.climb.rows){const c=cl(id,0,r[0],0);near(c.min,r[4],1e-9,id+' min');near(c.gal,r[5],1e-9,id+' gal');near(c.nm,r[6],1e-9,id+' nm');}
+}
+// 2) interpolación: altitud, RPM y temperatura (172S, valores impresos del POH)
+let q=cr('c172s',3000,2500,0);near(q.bhp,(73+69)/2,1e-9);near(q.tas,115,1e-9);near(q.gph,(9.9+9.5)/2,1e-9);            // entre 2000 y 4000 ft
+q=cr('c172s',2000,2450,0);near(q.bhp,(73+64)/2,1e-9);near(q.tas,(115+110)/2,1e-9);near(q.gph,(9.9+9.0)/2,1e-9);        // entre 2500 y 2400 RPM
+q=cr('c172s',2000,2500,10);near(q.bhp,(73+68)/2,1e-9);near(q.gph,(9.9+9.4)/2,1e-9);                                   // entre ISA e ISA+20
+q=cr('c172s',2000,2500,-10);near(q.bhp,(78+73)/2,1e-9);near(q.gph,(10.6+9.9)/2,1e-9);                                 // entre ISA−20 e ISA
+// 3) fuera de tabla: nunca se extrapola
+assert(cr('c172s',1000,2400,0).out&&/2.000/.test(cr('c172s',1000,2400,0).out),'bajo 2.000 ft');
+assert(cr('c172s',13000,2400,0).out,'sobre 12.000 ft');
+assert(cr('c172s',6000,3000,0).out&&/RPM/.test(cr('c172s',6000,3000,0).out),'RPM sobre la tabla');
+assert(cr('c172s',6000,1500,0).out,'RPM bajo la tabla');
+assert(cr('c172s',6000,2400,25).out&&cr('c172s',6000,2400,-25).out,'temperatura fuera de ±20 °C');
+assert(cr('c172p',2000,2500,-5).out&&/---/.test(cr('c172p',2000,2500,-5).out),'172P 2000 ft 2500 RPM: columna ISA−20 sin dato (---)');
+assert(cr('c172s',12000,2700,0).out,'RPM no publicado a esa altitud');
+// 4) ascenso: diferencia entre altitudes, +10 % por cada 10 °C sobre la estándar, y límites
+let c=cl('c172s',0,6000,0);assert.deepEqual([c.min,+c.gal.toFixed(6),c.nm],[10,2.2,13]);
+c=cl('c172s',2000,6000,0);assert.deepEqual([c.min,+c.gal.toFixed(6),c.nm],[7,1.4,9],'ascenso desde 2.000 ft = tabla(6000) − tabla(2000)');
+c=cl('c172s',0,6000,10);near(c.min,11,1e-9);near(c.gal,2.42,1e-9);near(c.nm,14.3,1e-9);
+c=cl('c172s',0,6000,-15);assert.deepEqual([c.min,+c.gal.toFixed(6),c.nm],[10,2.2,13],'más frío que ISA no reduce (el POH solo da el aumento)');
+c=cl('c172s',0,500,0);near(c.min,0.5,1e-9);near(c.gal,0.2,1e-9);near(c.nm,1,1e-9);
+c=cl('c172s',8000,6000,0);assert.deepEqual([c.min,c.gal,c.nm],[0,0,0],'cruzar más bajo que la salida: sin ascenso');
+assert(cl('c172s',0,13000,0).out,'ascenso sobre 12.000 ft: fuera de tabla');
+c=cl('c172s',-500,500,0);near(c.min,0.5,1e-9,'altitud de salida bajo el mar se trata como nivel del mar');
+
+// ---------------------------------------------------------------- planificador de ruta de punta a punta (172S, tablas del POH)
+set('r_mode','poh');set('r_alt',6000);set('r_rpm',2500);set('r_isa',0);set('r_dist',120);set('r_wind',0);set('r_res',30);set('r_taxi',1.4);set('f_gal',40);set('elev',0);set('qnh',1013.25);
+run('recalc()');
+// 6000 ft / 2500 RPM / ISA => 65 % · 114 kt · 9,0 gal/h; ascenso 10 min · 2,2 gal · 13 NM
+let hrsC=(120-13)/114;
+near(run('fuelNeeded'),1.4+2.2+hrsC*9.0+4.5,1e-9,'total = rodaje + ascenso + crucero + reserva');near(run('PLAN.hours'),10/60+hrsC,1e-9,'tiempo = ascenso + crucero');near(run('PLAN.gs'),114,1e-9);
+near(run('enrouteFuel'),2.2+hrsC*9.0,1e-9);
+assert(/Alcanza/.test(nodes.get('fuel_msg').innerHTML)&&/Ascenso/.test(nodes.get('fuel_tbl').innerHTML)&&/a 6.?000 ft/.test(nodes.get('fuel_tbl').innerHTML)&&/2.?500 RPM/.test(nodes.get('fuel_tbl').innerHTML)&&/Rodaje \+ despegue/.test(nodes.get('fuel_tbl').innerHTML),'tabla de fases');
+// viento de frente de 20 kt: velocidad suelo 94
+set('r_wind',20);run('recalc()');near(run('fuelNeeded'),1.4+2.2+(120-13)/94*9.0+4.5,1e-9,'viento de frente');set('r_wind',0);
+// +20 °C sobre ISA: columna ISA+20 del POH (113 kt, 8,5 gal/h; 6000 ft 2500 RPM = 60 % · 112 kt · 8,5) y ascenso +20 %
+set('r_isa',20);run('recalc()');
+{const tas=112,gph=8.5,cm=13*1.2;near(run('fuelNeeded'),1.4+2.2*1.2+(120-cm)/tas*gph+0.5*gph,1e-9,'ISA+20');}
+set('r_isa',0);
+// con poco combustible cargado: avisa cuánto falta; sigue pudiéndose cargar lo necesario
+set('f_gal',10);run('recalc()');assert(/no alcanza/.test(nodes.get('fuel_msg').innerHTML)&&/faltan/.test(nodes.get('fuel_msg').innerHTML));assert.equal(run('SUM.fuel.have<SUM.fuel.need'),true);assert.equal(nodes.get('fuel_apply').disabled,false);
+// ruta más larga que el tanque: no llegas sin escala, botón deshabilitado
+set('f_gal',40);set('r_dist',900);run('recalc()');assert(/No llegas sin escala/.test(nodes.get('fuel_msg').innerHTML));assert.equal(nodes.get('fuel_apply').disabled,true);
+set('r_dist',120);
+// fuera de la tabla del POH: mensaje claro, resumen en error y sin tabla de números inventados
+set('r_alt',1500);run('recalc()');assert(run('SUM.fuel.err'));assert(/2\.?000/.test(nodes.get('fuel_msg').innerHTML));assert.equal(nodes.get('fuel_tbl').innerHTML,'');assert.equal(nodes.get('fuel_apply').disabled,true);assert.equal(run('PLAN'),null);
+set('r_alt',6000);set('r_rpm',3000);run('recalc()');assert(run('SUM.fuel.err')&&/RPM/.test(nodes.get('fuel_msg').innerHTML));set('r_rpm',2500);
+// modo manual: valores propios; los campos del POH ocultos no se validan
+set('r_mode','man');set('r_wind',200);run('recalc()');assert.equal(run('validateInputs()'),false,'manual: viento mayor que la TAS');set('r_wind',0);
+set('r_tas',105);set('r_burn',8.5);set('r_climb',1.5);set('r_alt','');set('r_rpm','');run('recalc()');
+assert.equal(run('validateInputs()'),true,'manual: los campos del POH ocultos no invalidan');
+near(run('fuelNeeded'),1.4+1.5+120/105*8.5+4.25,1e-9,'manual: TAS y consumo propios');
+set('r_mode','poh');set('r_alt',6000);set('r_rpm',2500);run('recalc()');assert.equal(run('validateInputs()'),true);assert(!run('SUM.fuel.err'));
+
+// ---------------------------------------------------------------- la RPM por defecto sale de las tablas (≈65 % a 6.000 ft)
+for(const [id,m] of Object.entries(MODELS)){const rpm=JSON.parse(run('(()=>{const keep=MODEL;MODEL=MODELS.'+id+';try{return defaultRpm(MODEL)}finally{MODEL=keep}})()'));const a=m.cruise.alts.find(x=>x.pa===6000);const row=a.rows.find(r=>r[0]===rpm);assert(row&&row[2][0]>=60&&row[2][0]<=70,id+' RPM por defecto '+rpm+' => '+(row&&row[2][0])+' %');}
+
 // ---------------------------------------------------------------- cambio de modelo
 set('to_w',2400);run('recalc()');
 pick('c172m');
@@ -180,8 +261,10 @@ for(const id of ['c172r','c172p','c172n','c172s','c172m']){
   assert(run('SUM.to.ok')==='ok'||run('SUM.to.ok')==='warn'||run('SUM.to.ok')==='bad');assert(!run('SUM.to.out')&&!run('SUM.ld.out'),id+' con datos del POH a nivel del mar');
   const M=MODELS[id];assert.equal(nodes.get('tank_row').hidden,M.tanks.length<2);
   assert.equal(+nodes.get('w_empty').value,M.empty.w);assert.equal(+nodes.get('a_empty').value,M.empty.arm);
-  for(const v of ['spd_view','lim_view','tab_view','model_list','chart','to_out','ld_out','to_fig','ld_fig','wb_res'])assert(nodes.get(v).innerHTML.length>0&&!/NaN|Infinity|undefined|null/.test(nodes.get(v).innerHTML),id+' '+v+' sin NaN/undefined');
-  assert.equal((nodes.get('tab_view').innerHTML.match(/<table class="ptab">/g)||[]).length,M.perf.to.sheets.length+M.perf.ld.sheets.length,id+' una tabla por hoja del POH');
+  for(const v of ['spd_view','lim_view','tab_view','model_list','chart','to_out','ld_out','to_fig','ld_fig','wb_res','fuel_msg','fuel_tbl','fuel_out'])assert(nodes.get(v).innerHTML.length>0&&!/NaN|Infinity|undefined|null/.test(nodes.get(v).innerHTML),id+' '+v+' sin NaN/undefined');
+  assert.equal((nodes.get('tab_view').innerHTML.match(/<table class="ptab">/g)||[]).length,M.perf.to.sheets.length+M.perf.ld.sheets.length+M.cruise.alts.length+1,id+' una tabla por hoja del POH, por altitud de crucero y la de ascenso');
+  assert(run('SUM.fuel.need')>0&&!run('SUM.fuel.err'),id+' planificador de ruta con datos del POH: '+JSON.stringify(run('SUM.fuel')));
+  assert.equal(+nodes.get('r_taxi').value,M.climb.allow,id+' rodaje y despegue = valor del POH');
   assert(nodes.get('tab_view').innerHTML.includes(M.perf.to.fuente)&&nodes.get('tab_view').innerHTML.includes(M.perf.ld.fuente),id+' cita la figura del POH');
   assert((nodes.get('model_list').innerHTML.match(/data-model=/g)||[]).length===5,'cinco modelos en la lista');
   assert(new RegExp('data-model="'+id+'"').test(nodes.get('model_list').innerHTML.match(/<button[^>]*class="model on"[^>]*>/)?.[0]||''),id+' marcado como activo');
@@ -195,5 +278,46 @@ reset();
 // elegir de nuevo el modelo activo no pierde datos
 set('w_empty',1700);pick('c172r');assert.equal(nodes.get('w_empty').value,'1700');
 // Salidas finitas
-for (const id of ['chart','to_fig','ld_fig','to_out','ld_out','fuel_out','wb_res','spd_view','lim_view','tab_view']) assert(!/NaN|Infinity|undefined/.test(nodes.get(id).innerHTML), id + ' sin NaN');
-console.log('PASS: integridad de las 5 tablas POH (M, N, P, R, S), valores exactos e interpolación contra el POH, viento/hierba/sobrepeso, fuera de tabla, cambio de modelo y tanques, kg/L, validaciones y salidas finitas.');
+for (const id of ['chart','to_fig','ld_fig','to_out','ld_out','fuel_out','fuel_msg','fuel_tbl','wb_res','spd_view','lim_view','tab_view']) assert(!/NaN|Infinity|undefined/.test(nodes.get(id).innerHTML), id + ' sin NaN');
+
+// ---------------------------------------------------------------- base de aeródromos: datos y buscador
+const AD=JSON.parse(fs.readFileSync(__dirname+'/data/aerodromos.json','utf8'));
+{
+  const codes=AD.ad.map(a=>a.i);assert.equal(new Set(codes).size,codes.length,'códigos de aeródromo únicos');assert.equal(AD.total,AD.ad.length);
+  for(const a of AD.ad){
+    assert(Number.isFinite(a.lat)&&Number.isFinite(a.lon),a.i+' tiene coordenadas (sin ellas la ruta no se puede calcular)');
+    assert(a.lat<-17&&a.lat>-81&&a.lon<-50&&a.lon>-110,a.i+' coordenadas dentro del territorio chileno: '+a.lat+','+a.lon);
+    assert(a.r,a.i+' tiene región');
+  }
+  const regs=[...new Set(AD.ad.map(a=>a.r))];assert(!regs.includes('Vaparaíso')&&!regs.some(r=>/^[a-z]/.test(r)),'regiones bien escritas: '+regs);
+  const g=c=>AD.ad.find(a=>a.i===c);
+  // el vuelo del bug: SCTB tenía la latitud en blanco y el planificador seguía con 120 NM
+  assert(g('SCTB').lat<-33.4&&g('SCTB').lat>-33.5,'SCTB tiene latitud');
+  const gc=(a,b)=>{const r=Math.PI/180,h=Math.sin((b.lat-a.lat)*r/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin((b.lon-a.lon)*r/2)**2;return 2*3440.065*Math.asin(Math.sqrt(h));};
+  const nm=gc(g('SCTB'),g('SCVI'));assert(nm>330&&nm<400,'SCTB → SCVI (Villarrica) ≈ 360 NM, no 120: '+nm.toFixed(1));
+}
+(async()=>{
+  // buscador y lista de aeródromos (aerodromos.js con un DOM mínimo)
+  const stub=()=>{const o=new Proxy(function(){},{get:(t,k)=>k==='value'||k==='textContent'||k==='className'?(t[k]??''):k==='hidden'?(t[k]??false):k==='classList'?{toggle(){}}:k==='dataset'?{}:k==='closest'?()=>o:k==='options'?[]:k==='scrollTop'?0:(...a)=>o,set:(t,k,v)=>{t[k]=v;return true},apply:()=>o});return o;};
+  const nodesAD=new Map();const doc={getElementById:id=>{if(!nodesAD.has(id))nodesAD.set(id,stub());return nodesAD.get(id)},createElement:()=>stub(),createTextNode:()=>stub()};
+  const w={AD_DATA:AD};const c2=vm.createContext({document:doc,window:w,console,fetch:undefined,setTimeout});
+  vm.runInContext(fs.readFileSync(__dirname+'/aerodromos.js','utf8'),c2);await new Promise(r=>setTimeout(r,20));
+  const A=w.AD;assert(A&&typeof A.get==='function'&&typeof A.searchAll==='function'&&typeof A.browse==='function','API de aeródromos');
+  // por código, nombre, ciudad, región y varias palabras
+  assert.equal(A.search('scvi')[0].i,'SCVI','por código');
+  assert(A.search('villarrica').some(a=>a.i==='SCVI')&&A.search('villarrica').some(a=>a.i==='SCMF'),'por ciudad (Villarrica: SCVI y Malloco)');
+  assert(A.search('eulogio').some(a=>a.i==='SCTB'),'por nombre');assert.equal(A.search('tobalaba')[0].i,'SCTB','por el nombre con que lo conocen los pilotos (Tobalaba)');
+  assert(A.search('Pucón').some(a=>a.i==='SCPC'),'con tilde y mayúscula');
+  assert(A.search('puc').some(a=>a.i==='SCPC'),'por prefijo');
+  assert(A.search('araucania').length>10&&A.search('araucania').every(a=>/Araucan/.test(a.r)),'por región');
+  assert(A.search('araucania pucon').some(a=>a.i==='SCPC'),'varias palabras: región + ciudad');
+  assert(A.search('maule').length>=15,'una región lista muchos aeródromos');
+  const all=A.searchAll('a');assert(all.items.length<=60&&all.total>60,'tope de 60 resultados con el total informado: '+all.total);
+  assert.equal(A.search('zzzzqq').length,0,'sin coincidencias');
+  const br=A.browse();assert.equal(br.length,AD.ad.length,'explorar muestra todos los aeródromos');
+  assert.equal(br[0].r,'Arica y Parinacota','de norte a sur: parte en Arica');assert.equal(br[br.length-1].r,'Magallanes y de la Antártica Chilena','y termina en Magallanes');
+  // la ruta usa coordenadas completas
+  const rt=A.route(A.get('SCTB'),A.get('SCVI'));assert(rt&&rt.nm>330&&rt.nm<400,'ruta SCTB → SCVI');
+  assert.equal(A.route(A.get('SCTB'),{lat:null,lon:-70}),null,'sin coordenadas no hay ruta (la app lo avisa en vez de usar una distancia vieja)');
+  console.log('PASS: integridad de las 5 tablas POH (M, N, P, R, S), valores exactos e interpolación contra el POH, viento/hierba/sobrepeso, fuera de tabla, cambio de modelo y tanques, kg/L, validaciones y salidas finitas, margen seleccionable, crucero/ascenso del POH (celdas exactas, interpolación, fuera de tabla), planificador de ruta, datos y buscador de aeródromos.');
+})();

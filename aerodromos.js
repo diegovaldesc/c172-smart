@@ -37,21 +37,41 @@
     return r.json();
   }
 
-  function search(q) {
+  // Regiones de norte a sur (así las busca un piloto) y su nombre corto para las listas
+  const REGION_ORDER = ['Arica y Parinacota', 'Tarapacá', 'Antofagasta', 'Atacama', 'Coquimbo', 'Valparaíso', 'Metropolitana de Santiago',
+    'Libertador Gral. Bernardo O´Higgins', 'Maule', 'Ñuble', 'Bío Bío', 'La Araucanía', 'Los Ríos', 'Los Lagos',
+    'Aysén del Gral. Carlos Ibañez del Campo', 'Magallanes y de la Antártica Chilena'];
+  const REGION_SHORT = { 'Metropolitana de Santiago': 'Metropolitana', 'Libertador Gral. Bernardo O´Higgins': 'O’Higgins',
+    'Aysén del Gral. Carlos Ibañez del Campo': 'Aysén', 'Magallanes y de la Antártica Chilena': 'Magallanes' };
+  const regionRank = r => { const i = REGION_ORDER.indexOf(r); return i < 0 ? 99 : i; };
+  const regionName = r => REGION_SHORT[r] || r || 'Sin región';
+  const MAX_RESULTS = 60;
+  // Nombres con que los pilotos conocen a algunos aeródromos y que el AIP no usa como nombre oficial
+  const ALIAS = { SCTB: 'Tobalaba', SCEL: 'Pudahuel' };
+
+  // Búsqueda por código, nombre, ciudad o región; varias palabras = todas deben aparecer (ej. «lago ranco», «araucania pucon»)
+  function search(q, limit = MAX_RESULTS) {
     const t = norm(q).trim();
-    if (!t) return [];
+    if (!t) return { items: [], total: 0 };
+    const tokens = t.split(/\s+/);
     const scored = [];
     for (const a of DB) {
-      const code = norm(a.i), name = norm(a.n), city = norm(a.c);
+      const code = norm(a.i), name = norm(a.n), city = norm(a.c), al = norm(ALIAS[a.i]), reg = norm(a.r) + ' ' + norm(regionName(a.r));
       let s = -1;
       if (code === t) s = 0;
       else if (code.startsWith(t)) s = 1;
-      else if (name.startsWith(t) || city.startsWith(t)) s = 2;
-      else if (name.includes(t) || city.includes(t)) s = 3;
+      else if (name.startsWith(t) || city.startsWith(t) || al.startsWith(t)) s = 2;
+      else if (name.includes(t) || city.includes(t) || al.includes(t)) s = 3;
+      else if (tokens.every(k => code.includes(k) || name.includes(k) || city.includes(k) || al.includes(k) || reg.includes(k))) s = 4;
       if (s >= 0) scored.push([s, a]);
     }
-    scored.sort((x, y) => x[0] - y[0] || x[1].i.localeCompare(y[1].i));
-    return scored.slice(0, 8).map(x => x[1]);
+    scored.sort((x, y) => x[0] - y[0] || x[1].n.localeCompare(y[1].n, 'es'));
+    return { items: scored.slice(0, limit).map(x => x[1]), total: scored.length };
+  }
+
+  // Todos los aeródromos ordenados de norte a sur por región y luego por nombre (para explorar sin saber el código)
+  function browse() {
+    return DB.slice().sort((x, y) => regionRank(x.r) - regionRank(y.r) || x.n.localeCompare(y.n, 'es'));
   }
 
   // Distancia (círculo máximo, NM) y rumbo verdadero inicial entre dos aeródromos
@@ -66,18 +86,36 @@
   }
 
   // ---------- buscadores de Inicio ----------
-  function renderList(key, items) {
+  // items: aeródromos a mostrar; opts.group = con encabezados por región (modo explorar); opts.note = texto de cabecera
+  function renderList(key, items, opts = {}) {
     const box = el(`fl_${key}_list`);
     box.replaceChildren();
-    if (!items.length) box.append(make('p', 'Sin coincidencias. Busca por código, nombre o ciudad.', 'hint'));
+    if (opts.note) box.append(make('div', opts.note, 'adnote'));
+    if (!items.length) box.append(make('p', 'Sin coincidencias. Prueba con otra parte del nombre, la ciudad o la región.', 'hint'));
+    let reg = null;
     for (const a of items) {
+      if (opts.group && a.r !== reg) { reg = a.r; box.append(make('div', regionName(reg), 'adgroup')); }
       const b = make('button');
       b.type = 'button';
       b.setAttribute('role', 'option');
-      b.append(make('b', a.i), document.createTextNode(a.n), make('span', (a.c || '') + (a.el != null ? ' · ' + nf(a.el) + ' ft' : '')));
+      const txt = make('div', null, 'adn');
+      const meta = [a.c, opts.group ? '' : regionName(a.r), a.t === 'AP' ? 'aeropuerto' : '', ALIAS[a.i] ? 'también «' + ALIAS[a.i] + '»' : ''].filter(Boolean).join(' · ');
+      txt.append(make('em', a.n), make('small', meta));
+      b.append(make('b', a.i), txt, make('span', a.el != null ? nf(a.el) + ' ft' : ''));
       b.addEventListener('click', () => { setAerodrome(key, a.i, false); el(`fl_${key}_q`).blur(); });
       box.append(b);
     }
+    box.scrollTop = 0;
+  }
+
+  // Lo que muestra la lista según lo escrito: sin texto = todos los aeródromos por región; con texto = coincidencias
+  function showList(key, text) {
+    if (!norm(text).trim()) {
+      renderList(key, browse(), { group: true, note: `${DB.length} aeródromos, de norte a sur. Escribe el nombre, la ciudad, la región o el código para acotar.` });
+      return;
+    }
+    const r = search(text);
+    renderList(key, r.items, { note: r.total ? (r.total > r.items.length ? `${r.total} coincidencias, se muestran ${r.items.length}. Sigue escribiendo para acotar.` : `${r.total} ${r.total === 1 ? 'coincidencia' : 'coincidencias'}`) : '' });
   }
 
   function pickInfo(key, a) {
@@ -111,23 +149,38 @@
 
   function bindPicker(key) {
     const q = el(`fl_${key}_q`), list = el(`fl_${key}_list`);
+    const picker = q.closest('.picker');
+    const current = () => { const a = get(el('fl_' + key).value); return a ? label(a) : ''; };
     q.addEventListener('focus', () => {
       q.select();
+      // con la selección actual (o vacío) se explora toda la lista; si ya hay texto distinto, se busca con él
+      showList(key, q.value === current() ? '' : q.value);
       // en el celular, sube el campo para que la lista de resultados no quede tapada por el teclado ni por la barra inferior
-      setTimeout(() => q.closest('.picker').scrollIntoView({ block: 'start', behavior: 'smooth' }), 120);
+      setTimeout(() => picker.scrollIntoView({ block: 'start', behavior: 'smooth' }), 120);
     });
-    q.addEventListener('input', () => renderList(key, search(q.value)));
+    q.addEventListener('input', () => showList(key, q.value));
     q.addEventListener('keydown', e => {
       if (e.key === 'Enter') { const f = list.querySelector('button'); if (f) f.click(); e.preventDefault(); }
       else if (e.key === 'Escape') q.blur();
+      else if (e.key === 'ArrowDown') { const f = list.querySelector('button'); if (f) { f.focus(); e.preventDefault(); } }
     });
-    // al salir del campo sin elegir, vuelve a mostrarse la selección actual
-    q.addEventListener('blur', () => setTimeout(() => {
+    // navegación con flechas dentro de la lista
+    list.addEventListener('keydown', e => {
+      const btns = [...list.querySelectorAll('button')], i = btns.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown' && i >= 0) { (btns[i + 1] || btns[i]).focus(); e.preventDefault(); }
+      else if (e.key === 'ArrowUp' && i >= 0) { (i ? btns[i - 1] : q).focus(); e.preventDefault(); }
+      else if (e.key === 'Escape') { q.focus(); q.blur(); }
+    });
+    // al salir del campo y de la lista sin elegir, vuelve a mostrarse la selección actual
+    const leave = () => setTimeout(() => {
+      if (picker.contains(document.activeElement)) return;
       list.replaceChildren();
-      const a = get(el('fl_' + key).value);
-      q.value = a ? label(a) : '';
-    }, 250));
-    list.addEventListener('mousedown', e => e.preventDefault());
+      q.value = current();
+    }, 250);
+    q.addEventListener('blur', leave);
+    list.addEventListener('focusout', leave);
+    // mousedown en la lista no debe quitar el foco al campo (permite desplazar la lista con el mouse sin cerrarla)
+    list.addEventListener('mousedown', e => { if (!e.target.closest('button')) e.preventDefault(); });
     el(`fl_${key}_clear`).addEventListener('click', () => setAerodrome(key, '', false));
   }
 
@@ -218,7 +271,7 @@
   }
 
   // ---------- arranque ----------
-  window.AD = { get, route, search };
+  window.AD = { get, route, search: (q, n) => search(q, n).items, searchAll: search, browse };
 
   async function init() {
     const status = el('ad_status');

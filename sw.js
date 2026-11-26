@@ -1,4 +1,4 @@
-const CACHE = 'c172smart-v8';
+const CACHE = 'c172smart-v9';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'modelos.js', 'aerodromos.js', 'data/aerodromos.json', 'manifest.webmanifest', 'icon.svg'];
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES))));
 self.addEventListener('activate', e => e.waitUntil(

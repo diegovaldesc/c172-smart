@@ -105,6 +105,70 @@ function pohLookup(kind, pa, oat, w) {
   return { gr: mix(a[0], b[0]), d50: mix(a[1], b[1]), vr: lo.vr != null ? mix(lo.vr, hi.vr) : null, v50: mix(lo.v50, hi.v50), notes };
 }
 
+// ---------- Crucero y ascenso del POH ----------
+// cruise.alts[].rows = [RPM, [%BHP, KTAS, GPH] a ISA−20, ISA, ISA+20]; null = "---" (el POH no da dato).
+// climb.rows = [alt ft, °C, KIAS, fpm, min, gal, NM] medidos desde el nivel del mar, a temperatura estándar y aire calmo.
+// Se interpola linealmente (altitud, RPM, temperatura). Nunca se extrapola fuera de las tablas.
+const mixV = (a, b, f) => a.map((v, i) => v + f * (b[i] - v));
+
+// Una altitud de la tabla: interpola RPM y temperatura. Devuelve {v:[bhp,tas,gph]}, {range:[min,max]} o {nodata:true}
+function cruiseRow(alt, rpm, dev) {
+  const rows = alt.rows, lo = rows[rows.length - 1][0], hi = rows[0][0];
+  if (rpm > hi + 1e-9 || rpm < lo - 1e-9) return { range: [lo, hi] };
+  const i = rows.findIndex(r => r[0] <= rpm), A = rows[i], B = A[0] < rpm ? rows[i - 1] : A;
+  const fr = B === A ? 0 : (rpm - A[0]) / (B[0] - A[0]);
+  const j = dev < 0 ? 1 : 2, f = dev < 0 ? (dev + 20) / 20 : dev / 20;     // entre las columnas j y j+1 (1 = ISA−20, 2 = ISA, 3 = ISA+20)
+  const at = row => { const a = row[j], b = f > 1e-9 ? row[j + 1] : a; return a && b ? mixV(a, b, f) : null; };
+  const a = at(A), b = B === A ? a : at(B);
+  return a && b ? { v: mixV(a, b, fr) } : { nodata: true };
+}
+
+// Crucero a una altitud presión, RPM y desviación ISA. Devuelve {bhp, tas, gph} o {out: motivo}
+function cruiseAt(pa, rpm, dev) {
+  const alts = MODEL.cruise.alts, amin = alts[0].pa, amax = alts[alts.length - 1].pa;
+  if (dev < -20 - 1e-9 || dev > 20 + 1e-9) return { out: `El POH publica el crucero de 20 °C bajo a 20 °C sobre la ISA; tú ingresaste ${dev > 0 ? '+' : ''}${fmt(dev)} °C. Para otra temperatura usa el modo manual.` };
+  if (pa < amin - 1e-9 || pa > amax + 1e-9) return { out: `El POH publica el crucero entre ${fmt(amin)} y ${fmt(amax)} ft de altitud presión. Para otra altitud usa el modo manual.` };
+  const k = alts.findIndex((a, n) => n === alts.length - 1 || pa < alts[n + 1].pa);
+  const A = alts[k], fa = k === alts.length - 1 ? 0 : (pa - A.pa) / (alts[k + 1].pa - A.pa), B = fa > 1e-9 ? alts[k + 1] : A;   // exacto en una altitud: no mezcla la vecina
+  const ra = cruiseRow(A, rpm, dev), rb = B === A ? ra : cruiseRow(B, rpm, dev);
+  for (const [alt, r] of [[A, ra], [B, rb]]) {
+    if (r.range) return { out: `A ${fmt(alt.pa)} ft el POH publica de ${fmt(r.range[0])} a ${fmt(r.range[1])} RPM; ${fmt(rpm)} RPM queda fuera de la tabla.` };
+  }
+  if (ra.nodata || rb.nodata) return { out: 'El POH no publica dato ("---") para esa combinación de altitud, RPM y temperatura. Prueba con menos RPM.' };
+  const [bhp, tas, gph] = mixV(ra.v, rb.v, fa);
+  return { bhp, tas, gph };
+}
+
+// Rango de RPM publicado a una altitud (para guiar al piloto)
+function rpmRange(pa) {
+  const alts = MODEL.cruise.alts;
+  if (pa < alts[0].pa || pa > alts[alts.length - 1].pa) return null;
+  const k = alts.findIndex((a, n) => n === alts.length - 1 || pa < alts[n + 1].pa), near = pa - alts[k].pa < 1e-9 ? [alts[k]] : [alts[k], alts[k + 1]];
+  return [Math.max(...near.map(a => a.rows[a.rows.length - 1][0])), Math.min(...near.map(a => a.rows[0][0]))];
+}
+
+// Ascenso desde el nivel del mar hasta una altitud: {min, gal, nm, kias}. Linealmente entre las filas de la tabla.
+function climbFromSL(alt) {
+  const rows = MODEL.climb.rows;
+  if (alt <= 0) return { min: 0, gal: 0, nm: 0, kias: rows[0][2] };
+  const k = rows.findIndex((r, n) => n === rows.length - 1 || alt < rows[n + 1][0]), A = rows[k], B = rows[Math.min(k + 1, rows.length - 1)];
+  const f = B === A ? 0 : (alt - A[0]) / (B[0] - A[0]);
+  return { min: A[4] + f * (B[4] - A[4]), gal: A[5] + f * (B[5] - A[5]), nm: A[6] + f * (B[6] - A[6]), kias: A[2] + f * (B[2] - A[2]) };
+}
+// Ascenso entre la altitud de salida y la de crucero; +10 % de tiempo, combustible y distancia por cada 10 °C sobre la estándar (nota del POH)
+function climbBetween(fromPA, toPA, dev) {
+  const top = MODEL.climb.rows[MODEL.climb.rows.length - 1][0];
+  if (toPA > top + 1e-9) return { out: `El POH publica el ascenso hasta ${fmt(top)} ft. Para otra altitud usa el modo manual.` };
+  const a = climbFromSL(Math.max(0, fromPA)), b = climbFromSL(toPA), k = 1 + Math.max(0, dev) / 100;
+  const pos = x => Math.max(0, x);
+  return { min: pos(b.min - a.min) * k, gal: pos(b.gal - a.gal) * k, nm: pos(b.nm - a.nm) * k, kias: b.kias };
+}
+// RPM de ejemplo para un modelo: la fila de 6000 ft (temperatura estándar) cuya potencia se acerca más al 65 %
+function defaultRpm(m) {
+  const a = m.cruise.alts.find(x => x.pa === 6000) || m.cruise.alts[0];
+  return a.rows.reduce((best, r) => (r[2] && (!best || Math.abs(r[2][0] - 65) < Math.abs(best[2][0] - 65))) ? r : best, null)[0];
+}
+
 // ---------- Persistencia ----------
 const KEY = 'c172smart.v2';
 // data-nosave: campos de apoyo (buscadores, listas de pistas) que no se guardan
@@ -177,46 +241,62 @@ function calcWB() {
   }
   $('wb_msgs').innerHTML = msgs.join('');
   SUM.wb = { ok: issues.length === 0, tow: toff.w, margin: LIM.mtow - toff.w, issues };
-  drawChart([['Rampa', ramp, '#c4561b'], ['Despegue', toff, '#c4561b'], ['Sin comb.', zfw, '#2f5d8a']]);
+  drawChart([['Rampa', ramp, '#c4561b'], ['Despegue', toff, '#c4561b'], ['Sin combustible', zfw, '#2f5d8a']]);
 }
 
 function drawChart(points) {
-  const W = 420, H = 340, L = 46, R = 12, T = 28, B = 56;
+  // La envolvente va sola en el gráfico; los tres puntos se identifican por forma y color y se explican en la leyenda de abajo
+  // (rotularlos junto al punto los hacía chocar entre sí y con las etiquetas de límites: Rampa y Despegue casi coinciden).
+  const W = 420, H = 396, L = 46, R = 14, T = 28, B = 112;
   const x0 = Math.floor(LIM.fwdMin) - 3, x1 = Math.ceil(LIM.aft) + 3;
   const y0 = Math.floor(LIM.fwdKnee * 0.7 / 100) * 100, y1 = Math.ceil(LIM.mtow / 100) * 100 + 100;
   const X = v => L + (v - x0) / (x1 - x0) * (W - L - R);
   const Y = v => H - B - (v - y0) / (y1 - y0) * (H - T - B);
   const pts = p => p.map(q => X(q[0]).toFixed(1) + ',' + Y(q[1]).toFixed(1)).join(' ');
-  const wBot = y0;
+  const yb = H - B, mid = (X(LIM.fwdMin) + X(LIM.aft)) / 2;
   let s = '';
   // zona fuera de límites (rojo suave) y envolvente operacional (verde)
-  s += `<rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="#f1d9d4"/>`;
-  const env = [[LIM.fwdMin, wBot], [LIM.fwdMin, LIM.fwdKnee], [LIM.fwdMax, LIM.mtow], [LIM.aft, LIM.mtow], [LIM.aft, wBot]];
+  s += `<rect x="${L}" y="${T}" width="${W - L - R}" height="${yb - T}" fill="#f1d9d4"/>`;
+  const env = [[LIM.fwdMin, y0], [LIM.fwdMin, LIM.fwdKnee], [LIM.fwdMax, LIM.mtow], [LIM.aft, LIM.mtow], [LIM.aft, y0]];
   s += `<polygon points="${pts(env)}" fill="#d9e6db" stroke="#3d6b4f" stroke-width="2.5"/>`;
   // rejilla
-  for (let x = Math.ceil(x0 / 2) * 2; x <= x1; x += 2) s += `<line x1="${X(x)}" y1="${T}" x2="${X(x)}" y2="${H - B}" stroke="#fffdf8" stroke-opacity=".7"/><text x="${X(x)}" y="${H - B + 13}" fill="#6f6a5e" font-size="10" text-anchor="middle">${x}</text>`;
+  for (let x = Math.ceil(x0 / 2) * 2; x <= x1; x += 2) s += `<line x1="${X(x)}" y1="${T}" x2="${X(x)}" y2="${yb}" stroke="#fffdf8" stroke-opacity=".7"/><text x="${X(x)}" y="${yb + 13}" fill="#6f6a5e" font-size="10" text-anchor="middle">${x}</text>`;
   const step = uw() === 'kg' ? 100 : 250;
-  for (let d = Math.ceil(y0 / wf / step) * step; d * wf <= y1; d += step) { const y = d * wf; s += `<line x1="${L}" y1="${Y(y)}" x2="${W - R}" y2="${Y(y)}" stroke="#fffdf8" stroke-opacity=".7"/><text x="${L - 4}" y="${Y(y) + 3}" fill="#6f6a5e" font-size="10" text-anchor="end">${d}</text>`; }
-  s += `<rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="none" stroke="#bdb39f"/>`;
-  // etiquetas de límites
-  s += `<text x="${(X(LIM.fwdMin) + X(LIM.aft)) / 2}" y="${Y(LIM.mtow) + 13}" fill="#244632" font-size="11" font-weight="700" text-anchor="middle">MTOW ${dW(LIM.mtow)}</text>`;
-  s += `<text x="${(X(LIM.fwdMin) + X(LIM.aft)) / 2}" y="${Y(LIM.fwdKnee * 0.8 + wBot * 0.2)}" fill="#3d6b4f" font-size="12" font-weight="700" text-anchor="middle" opacity=".55">ENVOLVENTE OPERACIONAL</text>`;
-  s += `<text x="${X(LIM.aft) + 9}" y="${(Y(wBot) + Y(LIM.mtow)) / 2}" fill="#6e1f18" font-size="10" transform="rotate(90 ${X(LIM.aft) + 9} ${(Y(wBot) + Y(LIM.mtow)) / 2})" text-anchor="middle">Límite trasero ${fmt(LIM.aft, 1)} in</text>`;
-  s += `<text x="${X(LIM.fwdMin) - 6}" y="${(Y(wBot) + Y(LIM.fwdKnee)) / 2}" fill="#6e1f18" font-size="10" transform="rotate(-90 ${X(LIM.fwdMin) - 6} ${(Y(wBot) + Y(LIM.fwdKnee)) / 2})" text-anchor="middle">Límite delantero ${fmt(LIM.fwdMin, 1)} in</text>`;
-  s += `<text x="${(L + W - R) / 2}" y="${H - B + 28}" fill="#6f6a5e" font-size="11" text-anchor="middle">Brazo / posición del CG (in desde la referencia)</text>`;
-  s += `<text x="12" y="${(T + H - B) / 2}" fill="#6f6a5e" font-size="11" transform="rotate(-90 12 ${(T + H - B) / 2})" text-anchor="middle">Peso (${uw()})</text>`;
+  for (let d = Math.ceil(y0 / wf / step) * step; d * wf <= y1; d += step) { const y = d * wf; s += `<line x1="${L}" y1="${Y(y)}" x2="${W - R}" y2="${Y(y)}" stroke="#fffdf8" stroke-opacity=".7"/><text x="${L - 4}" y="${Y(y) + 3}" fill="#6f6a5e" font-size="10" text-anchor="end">${fmt(d)}</text>`; }
+  s += `<rect x="${L}" y="${T}" width="${W - L - R}" height="${yb - T}" fill="none" stroke="#bdb39f"/>`;
+  // límites: MTOW sobre su línea (fuera de la envolvente, para no tapar los puntos); CG delantero y trasero rotados en los bordes
+  s += `<text x="${mid}" y="${Y(LIM.mtow) - 5}" fill="#6e1f18" font-size="11" font-weight="700" text-anchor="middle">MTOW ${dW(LIM.mtow)}</text>`;
+  s += `<text x="${X(LIM.aft) + 10}" y="${(yb + Y(LIM.mtow)) / 2}" fill="#6e1f18" font-size="10" transform="rotate(90 ${X(LIM.aft) + 10} ${(yb + Y(LIM.mtow)) / 2})" text-anchor="middle">Límite trasero ${fmt(LIM.aft, 1)} in</text>`;
+  s += `<text x="${X(LIM.fwdMin) - 7}" y="${(yb + Y(LIM.fwdKnee)) / 2}" fill="#6e1f18" font-size="10" transform="rotate(-90 ${X(LIM.fwdMin) - 7} ${(yb + Y(LIM.fwdKnee)) / 2})" text-anchor="middle">Límite delantero ${fmt(LIM.fwdMin, 1)} in</text>`;
+  s += `<text x="${(L + W - R) / 2}" y="${yb + 28}" fill="#6f6a5e" font-size="11" text-anchor="middle">Posición del CG (in desde la referencia)</text>`;
+  s += `<text x="12" y="${(T + yb) / 2}" fill="#6f6a5e" font-size="11" transform="rotate(-90 12 ${(T + yb) / 2})" text-anchor="middle">Peso (${uw()})</text>`;
   // desplazamiento del CG al consumir combustible: rampa -> despegue -> sin combustible
   const [ramp, toff, zfw] = points.map(p => p[1]);
   const cl = v => [clamp(v.cg, x0, x1), clamp(v.w, y0, y1)];
   s += `<polyline points="${pts([cl(ramp), cl(toff), cl(zfw)])}" fill="none" stroke="#26292c" stroke-width="1.5" stroke-dasharray="4 3"/>`;
+  // marcadores: Rampa = anillo grande, Despegue = punto lleno (dentro del anillo si casi coinciden), Sin combustible = cuadrado azul
+  const marker = (i, cx, cy, ok, color) => {
+    const c = ok ? color : '#a8342a';
+    if (i === 0) return `<circle cx="${cx}" cy="${cy}" r="9" fill="none" stroke="${c}" stroke-width="2.5"/>`;
+    if (i === 1) return `<circle cx="${cx}" cy="${cy}" r="5" fill="${c}" stroke="#fff" stroke-width="1.5"/>`;
+    return `<rect x="${cx - 5.5}" y="${cy - 5.5}" width="11" height="11" fill="${c}" stroke="#fff" stroke-width="1.5"/>`;
+  };
+  const rows = [];
   points.forEach(([name, p, color], i) => {
-    const ok = inEnvelope(p.w, p.cg), px = X(clamp(p.cg, x0, x1)), py = Y(clamp(p.w, y0, y1));
-    const fill = ok ? color : '#a8342a';
-    s += `<circle cx="${px}" cy="${py}" r="6" fill="${i === 0 ? '#fffdf8' : fill}" stroke="${i === 0 ? fill : '#fff'}" stroke-width="${i === 0 ? 2.5 : 1.5}"/>`;
-    const left = px > (X(LIM.fwdMin) + X(LIM.aft)) / 2;
-    s += `<text x="${left ? px - 10 : px + 10}" y="${i === 0 ? py - 13 : py + 16}" fill="#26292c" font-size="11" font-weight="700" text-anchor="${left ? 'end' : 'start'}">${name}</text>`;
+    const ok = inEnvelope(p.w, p.cg);
+    s += marker(i, X(clamp(p.cg, x0, x1)), Y(clamp(p.w, y0, y1)), ok, color);
+    rows.push([i, name, p, ok, color]);
   });
-  // leyenda
+  // leyenda con los valores (una fila por punto)
+  const ly = yb + 52;
+  s += `<line x1="${L}" y1="${ly - 14}" x2="${W - R}" y2="${ly - 14}" stroke="#ddd3bf"/>`;
+  rows.forEach(([i, name, p, ok, color], n) => {
+    const y = ly + n * 22;
+    s += marker(i, L + 10, y - 4, ok, color);
+    s += `<text x="${L + 28}" y="${y}" fill="#26292c" font-size="12" font-weight="700">${name}</text>`;
+    s += `<text x="${L + 128}" y="${y}" fill="#26292c" font-size="12">${dW(p.w)} · CG ${fmt(p.cg, 2)} in</text>`;
+    s += `<text x="${W - R}" y="${y}" fill="${ok ? '#2d7a4f' : '#a8342a'}" font-size="12" font-weight="700" text-anchor="end">${ok ? '✔ dentro' : '✖ fuera'}</text>`;
+  });
   s += `<text x="${L}" y="16" fill="#26292c" font-size="12" font-weight="700">Envolvente de CG · categoría normal</text>`;
   s += `<text x="${W - R}" y="16" fill="#6f6a5e" font-size="10" text-anchor="end">verde = dentro · rojo = fuera</text>`;
   $('chart').innerHTML = s;
@@ -257,10 +337,10 @@ function drawRunway(svgId, cfg) {
   } else {
     s += `<path d="M${X0} ${YC - 34} Q${(X0 + sx(cfg.a)) / 2} ${YC - 30} ${sx(cfg.a)} ${YC}" fill="none" stroke="#f4efe3" stroke-width="2" stroke-dasharray="5 4"/>`;
   }
-  // margen 25 %
+  // margen de seguridad
   const col = cfg.ok === 'ok' ? '#3d6b4f' : cfg.ok === 'warn' ? '#a87414' : '#a8342a';
   s += `<line x1="${sx(cfg.need)}" y1="${Y0 - 26}" x2="${sx(cfg.need)}" y2="${Y1 + 6}" stroke="${col}" stroke-width="2" stroke-dasharray="4 3"/>`;
-  s += `<text x="${sx(cfg.need)}" y="${Y0 - 30}" fill="${col}" font-size="12" font-weight="700" text-anchor="${sx(cfg.need) > 380 ? 'end' : 'start'}">+25 %: ${fmt(cfg.need)} ft</text>`;
+  s += `<text x="${sx(cfg.need)}" y="${Y0 - 30}" fill="${col}" font-size="12" font-weight="700" text-anchor="${sx(cfg.need) > 380 ? 'end' : 'start'}">${cfg.mp > 0 ? '+' + fmt(cfg.mp) + ' %: ' : 'Necesario: '}${fmt(cfg.need)} ft</text>`;
 
   // marcadores y aviones
   if (cfg.kind === 'to') {
@@ -301,6 +381,9 @@ function atmosphere(p = '') {
 function windFactor(head) {
   return head >= 0 ? Math.max(0.5, 1 - 0.10 * head / 9) : 1 + 0.10 * (-head) / 2;
 }
+// Margen de seguridad sobre la distancia hasta/desde 50 ft (práctica recomendada, no un valor del POH)
+const marginPct = () => Math.max(0, parseFloat($('p_margin').value) || 0);
+const marginLbl = p => p > 0 ? `Con margen ${fmt(p)} %` : 'Sin margen (POH)';
 const kpi = (label, value, cls = '') => `<div class="kpi ${cls}"><b>${value}</b><span>${label}</span></div>`;
 
 // KPI de atmósfera, viento y pista de un aeródromo
@@ -323,6 +406,7 @@ function calcPerf() {
 
   // Despegue: condiciones del aeródromo de salida. Tablas del POH (altitud presión × temperatura × peso)
   // corregidas por viento y superficie según las notas del propio POH.
+  const mp = marginPct(), mk = 1 + mp / 100;
   const wT = num('to_w') * wf, sf = num('to_surf'), lenT = num('to_len');
   $('to_cond').textContent = `${MODEL.perf.to.flaps}, gas a fondo antes de soltar frenos`;
   const rT = pohLookup('to', aD.pa, num('oat'), wT);
@@ -335,18 +419,18 @@ function calcPerf() {
     const wfT = windFactor(aD.head);
     const gr = rT.gr * wfT * sf;
     const d50 = rT.d50 * wfT + (sf - 1) * rT.gr * wfT;
-    const need = d50 * 1.25;
+    const need = d50 * mk;
     const okT = need <= lenT ? 'ok' : (d50 <= lenT ? 'warn' : 'bad');
     $('to_out').innerHTML =
       kpi('Recorrido de despegue', fmt(gr) + ' ft') +
       kpi('Hasta 50 ft', fmt(d50) + ' ft', okT) +
-      kpi('Con margen 25 %', fmt(need) + ' ft', okT) +
+      kpi(marginLbl(mp), fmt(need) + ' ft', okT) +
       kpi('Pista restante', fmt(lenT - need) + ' ft', okT) +
       kpi('Rotación / a 50 ft', `${fmt(rT.vr)} / ${fmt(rT.v50)} KIAS`) +
       (wT > LIM.mtow ? kpi('¡Sobrepeso!', dW(wT - LIM.mtow), 'bad') : '');
     $('to_notes').innerHTML = notesHtml(rT, aD);
-    drawRunway('to_fig', { kind: 'to', len: lenT, a: gr, b: d50, need, ok: okT, rwy: num('rwy') });
-    SUM.to = { need, len: lenT, ok: okT };
+    drawRunway('to_fig', { kind: 'to', len: lenT, a: gr, b: d50, need, ok: okT, rwy: num('rwy'), mp });
+    SUM.to = { need, len: lenT, ok: okT, mp };
   }
 
   // Aterrizaje: condiciones del aeródromo de llegada
@@ -362,46 +446,102 @@ function calcPerf() {
     const wfL = windFactor(aA.head);
     const lgr = rL.gr * wfL * sl;
     const l50 = rL.d50 * wfL + (sl - 1) * rL.gr * wfL;
-    const needL = l50 * 1.25;
+    const needL = l50 * mk;
     const okL = needL <= lenL ? 'ok' : (l50 <= lenL ? 'warn' : 'bad');
     $('ld_out').innerHTML =
       kpi('Recorrido de aterrizaje', fmt(lgr) + ' ft') +
       kpi('Desde 50 ft', fmt(l50) + ' ft', okL) +
-      kpi('Con margen 25 %', fmt(needL) + ' ft', okL) +
+      kpi(marginLbl(mp), fmt(needL) + ' ft', okL) +
       kpi('Pista restante', fmt(lenL - needL) + ' ft', okL) +
       kpi('Velocidad a 50 ft', fmt(rL.v50) + ' KIAS') +
       (wL > LIM.mlw ? kpi('¡Sobre peso máx. de aterrizaje!', dW(wL - LIM.mlw), 'bad') : '');
     $('ld_notes').innerHTML = notesHtml(rL, aA);
-    drawRunway('ld_fig', { kind: 'ld', len: lenL, a: Math.max(0, l50 - lgr), b: l50, need: needL, ok: okL, rwy: num('a_rwy') });
-    SUM.ld = { need: needL, len: lenL, ok: okL };
+    drawRunway('ld_fig', { kind: 'ld', len: lenL, a: Math.max(0, l50 - lgr), b: l50, need: needL, ok: okL, rwy: num('a_rwy'), mp });
+    SUM.ld = { need: needL, len: lenL, ok: okL, mp };
   }
 }
 
 // ---------- Combustible ----------
-let fuelNeeded = 0, enrouteFuel = 0;
+// Plan de vuelo: rodaje/despegue + ascenso + crucero + reserva. Con las tablas del POH (modo "poh") o con valores propios (modo "man").
+let fuelNeeded = 0, enrouteFuel = 0, PLAN = null;
 const hm = hrs => { const t = Math.round(hrs * 60); return `${Math.floor(t / 60)} h ${String(t % 60).padStart(2, '0')} min`; };
+const mm = min => min < 1 ? '< 1 min' : `${fmt(Math.round(min))} min`;
+
+function syncMode() {
+  const poh = $('r_mode').value !== 'man';
+  $('r_poh_f').hidden = !poh; $('r_poh_info').hidden = !poh; $('r_man_f').hidden = poh;
+}
+
+function failFuel(msg) {
+  PLAN = null; fuelNeeded = enrouteFuel = 0;
+  $('fuel_msg').innerHTML = `<div class="msg bad">${msg}</div>`;
+  $('fuel_tbl').replaceChildren(); $('fuel_out').replaceChildren(); $('fuel_note').textContent = '';
+  $('fuel_apply').disabled = true;
+  SUM.fuel = { err: msg };
+}
+
 function calcFuel() {
-  const d = num('r_dist'), tas = num('r_tas'), wind = num('r_wind'), burn = num('r_burn') * ff;
-  const gs = tas - wind;   // validateInputs() garantiza gs > 0 antes de llegar aquí
-  const hrs = d / gs;
-  const trip = hrs * burn;
-  const resMin = num('r_res');
-  const res = resMin / 60 * burn;
-  const climb = num('r_climb') * ff;
-  const total = trip + LIM.taxi + climb + res;
-  fuelNeeded = total;
-  enrouteFuel = trip + climb;
-  const over = total > LIM.fuelMax;
+  const poh = $('r_mode').value !== 'man';
+  const d = num('r_dist'), wind = num('r_wind'), resMin = num('r_res'), taxi = LIM.taxi, have = num('f_gal') * ff;
+  const warns = [];
+  let tas, burn, bhp = null, climb = { min: 0, gal: 0, nm: 0 }, cruiseTxt, climbTxt, cruiseSub = '', climbSub = '', note;
+
+  if (poh) {
+    const aD = atmosphere(), dev = num('r_isa'), alt = num('r_alt'), rpm = num('r_rpm');
+    const rr = rpmRange(alt);
+    $('r_poh_info').textContent = rr ? `El POH publica de ${fmt(rr[0])} a ${fmt(rr[1])} RPM a ${fmt(alt)} ft.` : '';
+    const cr = cruiseAt(alt, rpm, dev);
+    if (cr.out) return failFuel(cr.out);
+    const c = climbBetween(aD.pa, alt, dev);
+    if (c.out) return failFuel(c.out);
+    tas = cr.tas; burn = cr.gph; bhp = cr.bhp; climb = c;
+    $('r_poh_info').textContent += ` A ${fmt(rpm)} RPM: ${fmt(bhp)} % de potencia, ${fmt(tas)} kt TAS, ${fmt(burn, 1)} gal/h.`;
+    climbTxt = 'Ascenso'; climbSub = `a ${fmt(alt)} ft${aD.pa > 100 ? ', desde ' + fmt(aD.pa) + ' ft' : ''} · ${fmt(c.kias)} KIAS aprox.`;
+    cruiseTxt = 'Crucero'; cruiseSub = `${fmt(alt)} ft · ${fmt(rpm)} RPM · ${fmt(bhp)} %`;
+    if (bhp > 75) warns.push(`Potencia de ${fmt(bhp)} %: sobre el 75 % el consumo sube y el motor trabaja más fuerte. Revisa la sección 4 del POH (crucero).`);
+    note = `Ascenso (Fig. 5-7) y crucero (Fig. 5-8) del POH, mezcla pobre, a ${dW(MODEL.cruise.w)} (el POH no corrige por peso: con menos peso rendirá algo mejor). ` +
+      `Ascenso con gas a fondo en aire calmo${dev > 0 ? `, con +${fmt(dev * 10)} % por ${fmt(dev)} °C sobre la ISA (nota del POH)` : ''}. Valores de avión nuevo: uno con horas consume algo más, para eso está la reserva.`;
+  } else {
+    tas = num('r_tas'); burn = num('r_burn') * ff; climb.gal = num('r_climb') * ff;
+    climbTxt = 'Ascenso (extra)'; cruiseTxt = 'Crucero'; cruiseSub = 'valores manuales';
+    note = 'Modo manual: TAS, consumo y combustible de ascenso son los que ingresaste, no del POH. El ascenso extra se suma al crucero de toda la distancia.';
+  }
+
+  const gs = tas - wind;
+  if (!(gs > 0)) return failFuel('El viento de frente iguala o supera la velocidad verdadera: no hay avance. Revisa viento y crucero.');
+  if (d < climb.nm) warns.push(`La ruta (${fmt(d)} NM) es más corta que el ascenso hasta esa altitud (${fmt(climb.nm)} NM): el cálculo sobreestima; baja la altitud de crucero.`);
+  const cruiseNm = Math.max(0, d - climb.nm), hrsC = cruiseNm / gs, cruiseGal = hrsC * burn, res = resMin / 60 * burn;
+  const total = taxi + climb.gal + cruiseGal + res, flightHrs = climb.min / 60 + hrsC;
+  const over = total > LIM.fuelMax, short = have + 1e-9 < total;
+  const rangeWith = gal => { const av = gal - taxi - climb.gal - res; return av > 0 ? climb.nm + av / burn * gs : 0; };
+  const rangeLoaded = rangeWith(have), rangeFull = rangeWith(LIM.fuelMax);
+
+  fuelNeeded = total; enrouteFuel = climb.gal + cruiseGal;
+  PLAN = { gs, tas, burn, total, hours: flightHrs, ete: nm => climb.min / 60 + Math.max(0, nm - climb.nm) / gs };
   $('fuel_apply').disabled = over;   // no se puede cargar lo que no cabe en los tanques
+
+  let msg;
+  if (over) msg = ['bad', `<b>No llegas sin escala.</b> La ruta pide ${dF(total)} y los tanques rinden ${dF(LIM.fuelMax, 0)}. Con tanques llenos y ${fmt(resMin)} min de reserva alcanzas unas ${fmt(rangeFull)} NM a ${fmt(gs)} kt de velocidad suelo. Opciones: hacer escala, bajar RPM o aceptar menos reserva.`];
+  else if (short) msg = ['bad', `<b>El combustible cargado no alcanza.</b> Tienes ${dF(have)} y necesitas ${dF(total)}: faltan ${dF(total - have)}. Con lo cargado llegas hasta unas ${fmt(rangeLoaded)} NM con reserva. Usa el botón de abajo para cargar lo necesario.`];
+  else msg = ['ok', `<b>Alcanza.</b> Con ${dF(have)} llegas con ${dF(have - total)} sobre la reserva de ${fmt(resMin)} min.`];
+  $('fuel_msg').innerHTML = `<div class="msg ${msg[0]}">${msg[1]}</div>` + warns.map(w => `<div class="msg warn">${w}</div>`).join('');
+
+  const row = (a, t, nm, g, sub) => `<tr><td>${a}${sub ? `<small>${sub}</small>` : ''}</td><td>${t}</td><td>${nm}</td><td>${g}</td></tr>`;
+  $('fuel_tbl').innerHTML = '<thead><tr><th>Fase</th><th>Tiempo</th><th>Dist.</th><th>Comb.</th></tr></thead><tbody>' +
+    row('Rodaje + despegue', '—', '—', dF(taxi)) +
+    row(climbTxt, poh ? mm(climb.min) : '—', poh ? fmt(climb.nm) + ' NM' : '—', dF(climb.gal), climbSub) +
+    row(cruiseTxt, hm(hrsC), fmt(cruiseNm) + ' NM', dF(cruiseGal), `${cruiseSub ? cruiseSub + ' · ' : ''}TAS ${fmt(tas)} kt, suelo ${fmt(gs)} kt · ${fmt(burn / ff, 1)} ${uf() === 'L' ? 'L' : 'gal'}/h`) +
+    row('Reserva', mm(resMin), '—', dF(res), `${fmt(resMin)} min a consumo de crucero`) +
+    `</tbody><tfoot><tr><td>Total</td><td>${hm(flightHrs)}</td><td>${fmt(d)} NM</td><td>${dF(total)}</td></tr></tfoot>`;
+
   $('fuel_out').innerHTML =
-    kpi('Velocidad suelo', fmt(gs) + ' kt') +
-    kpi('Tiempo en ruta', hm(hrs)) +
-    kpi('Combustible de ruta', dF(trip)) +
-    kpi('Reserva', dF(res)) +
-    kpi('Total necesario', dF(total), over ? 'bad' : 'ok') +
+    kpi('Total necesario', dF(total), over || short ? 'bad' : 'ok') +
+    kpi('Tiempo de vuelo', hm(flightHrs)) +
     kpi('Total en peso', dW(total * LIM.lbPerGal)) +
-    kpi(`Autonomía con ${dF(LIM.fuelMax, 0)}`, fmt(LIM.fuelMax / burn - resMin / 60, 1) + ' h + reserva');
-  SUM.fuel = { need: total, have: num('f_gal') * ff, max: LIM.fuelMax };
+    kpi(`Alcance con ${dF(have, 0)} cargados`, fmt(rangeLoaded) + ' NM', short ? 'bad' : '') +
+    kpi(`Alcance con ${dF(LIM.fuelMax, 0)} (llenos)`, fmt(rangeFull) + ' NM');
+  $('fuel_note').textContent = note + ' La distancia es en línea recta entre aeródromos: la ruta real suele ser algo más larga.';
+  SUM.fuel = { need: total, have, max: LIM.fuelMax };
 }
 
 // ---------- Inicio: vuelo y resumen ----------
@@ -411,8 +551,8 @@ function setRow(id, cls, title, text) {
   r.querySelector('b').textContent = title;
   r.querySelector('small').textContent = text;
 }
-const fitText = o => o.out ? o.out : o.ok === 'ok' ? `Con margen del 25 %: ${fmt(o.need)} ft de ${fmt(o.len)} ft disponibles`
-  : o.ok === 'warn' ? `Sin el margen del 25 %: pide ${fmt(o.need)} ft, hay ${fmt(o.len)} ft`
+const fitText = o => o.out ? o.out : o.ok === 'ok' ? (o.mp > 0 ? `Con margen del ${fmt(o.mp)} %: ${fmt(o.need)} ft de ${fmt(o.len)} ft disponibles` : `Cabe según el POH: ${fmt(o.need)} ft de ${fmt(o.len)} ft disponibles`)
+  : o.ok === 'warn' ? `Sin el margen del ${fmt(o.mp)} %: pide ${fmt(o.need)} ft, hay ${fmt(o.len)} ft`
   : `No cabe: pide ${fmt(o.need)} ft, hay ${fmt(o.len)} ft`;
 
 // valid = false: el boleto de vuelo se sigue actualizando, pero el resumen avisa que faltan datos
@@ -428,13 +568,22 @@ function renderHome(valid = true) {
   $('chip').textContent = f || t ? `${f ? f.i : '····'} → ${t ? t.i : '····'}` : 'Sin vuelo';
 
   const rt = f && t ? A.route(f, t) : null;
-  const gs = num('r_tas') - num('r_wind');
   $('tk_dist').textContent = rt ? fmt(rt.nm) + ' NM' : '';
+  const noPos = f && t ? [f, t].filter(a => a.lat == null || a.lon == null).map(a => a.i).join(' y ') : '';
   $('tk_meta').textContent = rt
-    ? `En línea recta · rumbo verdadero ${String(Math.round(rt.brg) % 360).padStart(3, '0')}°` + (gs > 0 ? ` · ETE ${hm(rt.nm / gs)} a ${fmt(gs)} kt` : '')
-    : (f && t ? 'Sin coordenadas para calcular la distancia.' : 'Elige origen y destino para ver distancia, rumbo y tiempo.');
-  $('fuel_route').hidden = !rt;
-  if (rt) $('fuel_route_txt').textContent = `${f.i} → ${t.i}: ${fmt(rt.nm)} NM en línea recta`;
+    ? `En línea recta · rumbo verdadero ${String(Math.round(rt.brg) % 360).padStart(3, '0')}°` + (PLAN ? ` · ETE ${hm(PLAN.ete(rt.nm))} a ${fmt(PLAN.gs)} kt de velocidad suelo` : '')
+    : (f && t ? `⚠ Falta la posición de ${noPos}: no se puede calcular la distancia.` : 'Elige origen y destino para ver distancia, rumbo y tiempo.');
+  // Caja de ruta en Combustible: avisa si la distancia usada no es la de la ruta, o si no hay coordenadas (nunca usar una distancia antigua en silencio)
+  const box = $('fuel_route');
+  box.hidden = !(f && t);
+  box.classList.toggle('warnbox', !!(f && t) && (!rt || Math.ceil(rt.nm) !== num('r_dist')));
+  if (f && t) {
+    const used = num('r_dist'), same = rt && Math.ceil(rt.nm) === used;
+    $('fuel_route_txt').textContent = !rt ? `⚠ Falta la posición de ${noPos}: no se pudo calcular la distancia ${f.i} → ${t.i}. Ingrésala a mano.`
+      : same ? `✔ ${f.i} → ${t.i}: ${fmt(rt.nm)} NM en línea recta (la que usa el planificador)`
+      : `${f.i} → ${t.i}: ${fmt(rt.nm)} NM en línea recta. ⚠ El planificador usa ${fmt(used)} NM.`;
+    $('fuel_route_apply').hidden = !rt || same;
+  }
 
   $('model_specs').textContent = `MTOW ${dW(LIM.mtow)} · ${dF(LIM.fuelMax, 0)} utilizables · Fuente: ${MODEL.poh}`;
 
@@ -451,7 +600,8 @@ function renderHome(valid = true) {
   if (SUM.to) setRow('sum_to', SUM.to.ok, 'Despegue' + (f ? ' · ' + f.i : ''), fitText(SUM.to));
   if (SUM.ld) setRow('sum_ld', SUM.ld.ok, 'Aterrizaje' + (t ? ' · ' + t.i : ''), fitText(SUM.ld));
   const fu = SUM.fuel;
-  if (fu) {
+  if (fu && fu.err) setRow('sum_fuel', 'bad', 'Combustible', fu.err);
+  else if (fu) {
     // 1e-9: tolerancia de coma flotante (p. ej. litros convertidos de ida y vuelta)
     const short = fu.have + 1e-9 < fu.need;
     const cls = fu.need > fu.max || short ? 'bad' : 'ok';
@@ -486,6 +636,8 @@ function setModel(id, reset, tankId) {
     $('to_w').value = w(Math.round(MODEL.w.mtow * 0.94 / 10) * 10);
     $('ld_w').value = w(Math.round(MODEL.w.mtow * 0.86 / 10) * 10);
     $('f_gal').value = g(Math.round(LIM.fuelMax * 0.75));
+    $('r_taxi').value = +(MODEL.climb.allow / ff).toFixed(1);   // rodaje y despegue: el valor del POH del modelo
+    $('r_rpm').value = defaultRpm(MODEL);
   }
   renderModelUI();
   renderModelViews();
@@ -499,6 +651,7 @@ function renderModelUI() {
       <span class="mtxt"><b>${m.nombre}</b><small>${m.sub}</small></span>
       <span class="check" aria-hidden="true">✔</span></button>`;
   }).join('') + '<div class="model soon"><span>Más modelos (K, L, Q…) próximamente, a medida que se carguen sus POH</span></div>';
+  $('taxi_poh').textContent = `El POH del ${MODEL.nombre.replace('Cessna ', '').replace(' Skyhawk', '')} indica ${fmt(MODEL.climb.allow, 1)} gal (${fmt(MODEL.climb.allow * L_PER_GAL, 1)} L) para arranque, rodaje y despegue. Súmale rodaje largo o espera en cabecera.`;
   $('empty_note').textContent = `Peso vacío y brazo precargados con el ejemplo del POH (${MODEL.empty.nota.replace(/^Ejemplo del POH: /, '')}). Reemplázalos por los de la hoja de peso y balance de tu matrícula.`;
 }
 
@@ -506,6 +659,17 @@ function sheetTable(sh, m) {
   const head = `<tr><th rowspan="2">Alt. presión (ft)</th>${m.perf.oat.map(t => `<th colspan="2">${t} °C</th>`).join('')}</tr>` +
     `<tr>${m.perf.oat.map(() => '<th>Suelo</th><th>50 ft</th>').join('')}</tr>`;
   const body = m.perf.pa.map((pa, i) => `<tr><th>${pa === 0 ? 'S.L.' : fmt(pa)}</th>${sh.rows[i].map(x => `<td>${x == null ? '—' : fmt(x)}</td>`).join('')}</tr>`).join('');
+  return `<div class="tscroll"><table class="ptab"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+}
+
+function cruiseTable(a) {
+  const head = '<tr><th rowspan="2">RPM</th>' + ['ISA −20 °C', 'ISA', 'ISA +20 °C'].map(t => `<th colspan="3">${t}</th>`).join('') + '</tr><tr>' + '<th>%</th><th>KTAS</th><th>GPH</th>'.repeat(3) + '</tr>';
+  const body = a.rows.map(r => `<tr><th>${r[0]}</th>${r.slice(1).map(c => c ? `<td>${c[0]}</td><td>${c[1]}</td><td>${fmt(c[2], 1)}</td>` : '<td>—</td><td>—</td><td>—</td>').join('')}</tr>`).join('');
+  return `<p class="sub">${fmt(a.pa)} ft de altitud presión</p><div class="tscroll"><table class="ptab"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+}
+function climbTable(m) {
+  const head = '<tr><th>Alt. (ft)</th><th>°C</th><th>KIAS</th><th>fpm</th><th>min</th><th>gal</th><th>NM</th></tr>';
+  const body = m.climb.rows.map(r => `<tr><th>${r[0] === 0 ? 'S.L.' : fmt(r[0])}</th><td>${r[1]}</td><td>${r[2]}</td><td>${fmt(r[3])}</td><td>${r[4]}</td><td>${fmt(r[5], 1)}</td><td>${r[6]}</td></tr>`).join('');
   return `<div class="tscroll"><table class="ptab"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
 }
 
@@ -553,7 +717,11 @@ function renderModelViews() {
   $('tab_view').innerHTML =
     `<p class="hint nomargin">Tablas del POH (${m.poh}), en pies. <b>Suelo</b> = recorrido en tierra; <b>50 ft</b> = distancia total hasta/desde 50 ft de altura. "—" = el POH no da dato. Compáralas con tu ejemplar del POH.</p>` +
     part('Despegue', m.perf.to, 'Pista pavimentada, nivelada, seca, viento calmo. La app corrige por viento según el POH (−10 % por cada 9 kt de frente; +10 % por cada 2 kt de cola, hasta 10 kt) y por hierba seca (+' + fmt(m.perf.grass.to * 100) + ' % del recorrido en tierra).') +
-    part('Aterrizaje', m.perf.ld, 'Pista pavimentada, nivelada, seca, viento calmo, frenado máximo. La app corrige por viento según el POH y por hierba seca (+' + fmt(m.perf.grass.ld * 100) + ' % del recorrido en tierra).');
+    part('Aterrizaje', m.perf.ld, 'Pista pavimentada, nivelada, seca, viento calmo, frenado máximo. La app corrige por viento según el POH y por hierba seca (+' + fmt(m.perf.grass.ld * 100) + ' % del recorrido en tierra).') +
+    `<div class="card"><h2>Crucero <small>${m.cruise.cond} · Fig. 5-8</small></h2>` + m.cruise.alts.map(cruiseTable).join('') +
+    '<p class="hint">%: potencia (% BHP) · KTAS: velocidad verdadera · GPH: galones por hora. "—" = el POH no da dato. Tal como las publica el POH, a ' + lbkg(m.cruise.w) + '; la app interpola entre filas, altitudes y temperaturas.</p></div>' +
+    `<div class="card"><h2>Ascenso <small>${m.climb.cond} · Fig. 5-7 · a ${lbkg(m.climb.w)}</small></h2>` + climbTable(m) +
+    '<p class="hint">Tiempo, combustible y distancia medidos desde el nivel del mar. El POH agrega ' + fmt(m.climb.allow, 1) + ' gal para arranque, rodaje y despegue, y +10 % de tiempo, combustible y distancia por cada 10 °C sobre la temperatura estándar.</p></div>';
 }
 
 // ---------- Navegación ----------
@@ -584,13 +752,13 @@ function go(tab, open) {
 // ---------- Eventos ----------
 // ---------- Validación ----------
 // Si falta un dato o es imposible, se suspenden los resultados: es mejor no mostrar nada que un número falso.
-const SIGNED = ['elev', 'a_elev', 'oat', 'a_oat', 'r_wind'];                       // pueden ser negativos
-const POSITIVE = ['w_empty', 'to_w', 'ld_w', 'qnh', 'a_qnh', 'r_tas', 'r_burn', 'to_len', 'ld_len'];
+const SIGNED = ['elev', 'a_elev', 'oat', 'a_oat', 'r_wind', 'r_isa'];                       // pueden ser negativos
+const POSITIVE = ['w_empty', 'to_w', 'ld_w', 'qnh', 'a_qnh', 'r_tas', 'r_burn', 'to_len', 'ld_len', 'r_alt', 'r_rpm'];
 // En blanco valen 0 (p. ej. "sin pasajeros atrás"); la pista y la dirección del viento solo importan si hay viento
 const BLANK_OK = ['w_front', 'w_rear', 'w_bagA', 'w_bagB', 'f_gal', 'wspd', 'a_wspd', 'r_dist', 'r_taxi', 'r_climb'];
 const NEEDS_WIND = { rwy: 'wspd', wdir: 'wspd', a_rwy: 'a_wspd', a_wdir: 'a_wspd' };
 // Rangos físicamente razonables: atrapan errores de tipeo (p. ej. QNH 10013)
-const RANGE = { elev: [-1500, 20000], a_elev: [-1500, 20000], qnh: [850, 1100], a_qnh: [850, 1100], oat: [-60, 60], a_oat: [-60, 60], wspd: [0, 150], a_wspd: [0, 150], r_tas: [30, 300], r_wind: [-150, 150] };
+const RANGE = { elev: [-1500, 20000], a_elev: [-1500, 20000], qnh: [850, 1100], a_qnh: [850, 1100], oat: [-60, 60], a_oat: [-60, 60], wspd: [0, 150], a_wspd: [0, 150], r_tas: [30, 300], r_wind: [-150, 150], r_alt: [0, 30000], r_rpm: [500, 3500], r_isa: [-60, 60] };
 const DEP_IDS = ['elev', 'qnh', 'oat', 'rwy', 'wdir', 'wspd', 'to_w', 'to_len'], ARR_IDS = ['a_elev', 'a_qnh', 'a_oat', 'a_rwy', 'a_wdir', 'a_wspd', 'ld_w', 'ld_len'];
 let invalidMsg = '';
 
@@ -606,6 +774,7 @@ function fieldName(e) {
 function validateInputs() {
   const invalid = [];
   document.querySelectorAll('input[type="number"]').forEach(e => {
+    if (e.closest('[hidden]')) { e.removeAttribute('aria-invalid'); return; }   // campos de un modo que no está en uso
     const blank = e.value.trim() === '', v = Number(e.value);
     const windFld = NEEDS_WIND[e.id];
     const mayBeBlank = BLANK_OK.includes(e.id) || (windFld && !(num(windFld) > 0));
@@ -618,7 +787,7 @@ function validateInputs() {
     e.setAttribute('aria-invalid', String(!!bad));
     if (bad) invalid.push(e);
   });
-  const routeOK = num('r_tas') > num('r_wind');
+  const routeOK = $('r_mode').value === 'poh' || num('r_tas') > num('r_wind');
   const ok = !invalid.length && !!MODEL && routeOK;
   if (invalid.length) {
     const n = [...new Set(invalid.map(fieldName))];
@@ -630,9 +799,10 @@ function validateInputs() {
   return ok;
 }
 
-const OUTPUT_IDS = ['wb_res', 'wb_msgs', 'chart', 'atm_out', 'a_atm_out', 'to_out', 'ld_out', 'to_fig', 'ld_fig', 'to_notes', 'ld_notes', 'fuel_out'];
+const OUTPUT_IDS = ['wb_res', 'wb_msgs', 'chart', 'atm_out', 'a_atm_out', 'to_out', 'ld_out', 'to_fig', 'ld_fig', 'to_notes', 'ld_notes', 'fuel_out', 'fuel_msg', 'fuel_tbl'];
 function recalc() {
   save();
+  syncMode();
   readModel();
   const ok = validateInputs();
   document.querySelectorAll('[data-copy]').forEach(b => { b.disabled = !ok; });
@@ -640,7 +810,8 @@ function recalc() {
     OUTPUT_IDS.forEach(id => $(id).replaceChildren());
     $('fuel_apply').disabled = true;
     Object.keys(SUM).forEach(k => { SUM[k] = null; });
-    TOW = fuelNeeded = enrouteFuel = 0;
+    $('fuel_note').textContent = '';
+    TOW = fuelNeeded = enrouteFuel = 0; PLAN = null;
     renderHome(false);
     return;
   }
