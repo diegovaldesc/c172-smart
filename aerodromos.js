@@ -69,6 +69,7 @@
   function renderList(key, items) {
     const box = el(`fl_${key}_list`);
     box.replaceChildren();
+    if (!items.length) box.append(make('p', 'Sin coincidencias. Busca por código, nombre o ciudad.', 'hint'));
     for (const a of items) {
       const b = make('button');
       b.type = 'button';
@@ -196,11 +197,15 @@
     const r = a.rw[+idx] || {};
     const des = r[end] || '';
     const done = [];
+    // Missing airport data must never retain the preceding runway's values.
+    [cfg.elev, cfg.rwy, cfg.len].forEach(id => el(id).value = '');
     if (a.el != null) { el(cfg.elev).value = Math.round(a.el); done.push(`elevación ${nf(a.el)} ft`); }
     const num = parseInt(des, 10);
     if (num >= 1 && num <= 36) { el(cfg.rwy).value = num; done.push(`pista ${des}`); }
     if (r.l) { el(cfg.len).value = Math.round(r.l * M_TO_FT); done.push(`largo ${nf(Math.round(r.l * M_TO_FT))} ft`); }
-    const surfIdx = hasPaved(r.sf || a.sf) ? 0 : (a.sf ? 2 : -1);
+    const surface = r.sf || a.sf;
+    const surfIdx = hasPaved(surface) ? 0 : (surface ? 2 : -1);
+    if (surfIdx < 0) { el(cfg.surf).selectedIndex = 0; done.push('superficie desconocida: revisa y selecciona la corrección manualmente'); }
     if (surfIdx >= 0) {
       el(cfg.surf).selectedIndex = surfIdx;
       done.push(surfIdx === 0 ? 'superficie pavimentada' : 'superficie sin pavimentar o mixta (se usa la corrección de pasto seco como aproximación; revisa la superficie)');
@@ -238,3 +243,5 @@
   }
   init();
 })();
+
+
