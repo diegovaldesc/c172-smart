@@ -334,3 +334,21 @@ svg.fig:empty{display:none}
 .rt-vr b{display:block;font-size:13px}
 .rt-vr small{display:block;color:var(--mut);font-size:12px;line-height:1.35}
 .rt-vr .rt-use{background:#d9571a;color:#fff;border-color:#d9571a}
+/* texto de las rutas visuales del AIP (ENR 7.1 a 7.8) y sus puntos publicados */
+.rt-ppw{background:none;border:0}
+.rt-pp{position:absolute;font:800 10.5px var(--mono);color:#16222e;white-space:nowrap;display:flex;align-items:center;gap:4px;transform:translate(-6px,-6px)}
+.rt-pp i{width:11px;height:11px;border-radius:2px;transform:rotate(45deg);background:#fff;border:2.5px solid #2f5d8a;flex:none}
+.rt-pp{font-size:0}
+.rt-z-vrc .rt-pp{font-size:10.5px;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 2px #fff}
+.rt-rv{margin:12px 0 4px;padding-top:6px;border-top:1px dashed var(--line)}
+.rt-rvh{margin:12px 0 4px;font:800 12px var(--mono);letter-spacing:.4px;text-transform:uppercase;color:var(--accd)}
+.rt-rvi{border:1px solid var(--line);border-radius:10px;background:var(--field);margin:6px 0;padding:0 12px}
+.rt-rvi.sug{border-color:#d9571a;box-shadow:0 0 0 1px #d9571a inset}
+.rt-rvi summary{cursor:pointer;padding:10px 0;min-height:24px;list-style-position:inside;font-size:13.5px}
+.rt-rvi summary em{display:inline-block;margin-left:8px;font:700 11px var(--mono);font-style:normal;color:#fff;background:#d9571a;border-radius:8px;padding:1px 7px;vertical-align:1px}
+.rt-rvi p{margin:6px 0;font-size:13.5px;line-height:1.5}
+.rt-rvc{color:var(--ink)}
+.rt-rvn{color:#7a4a12;background:#fbf0dc;border-radius:8px;padding:6px 9px}
+.rt-rvp{font-size:13px!important}
+.rt-rvi .rt-pbtn{width:100%}
+.rt-rvw,.rt-rvf{display:block;color:var(--mut);font-size:12px;line-height:1.4;margin:6px 0 10px}

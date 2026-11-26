@@ -106,4 +106,32 @@ for (const l of CAN.labels) { assert(/^(\d{4} ft|FL ?\d{3})$/.test(l.t), 'etique
 // desde SCTB salen rutas visuales (la ruta verde hacia SCLC está en la carta VRC-1 / ENR 7.8)
 assert(CAN.items.some(it => it.k === 'ruta' && it.t === 'S' && it.desde && it.desde.i === 'SCTB'), 'hay salida visual desde SCTB');
 assert(CAN.items.some(it => it.k === 'ruta' && it.hasta && it.hasta.i === 'SCLC'), 'hay ruta visual hacia SCLC');
-console.log('PASS: ruta.js (geodesia, viento, plan por tramos, cruce de espacios, límites verticales), ' + ESP.length + ' espacios aéreos y ' + CAN.items.length + ' trazos de rutas visuales.');
+// ---- texto de las rutas visuales del AIP (data/rutas_visuales.json, ENR 7.1 a 7.8) ----
+const RV = JSON.parse(fs.readFileSync(__dirname + '/data/rutas_visuales.json', 'utf8'));
+assert.deepStrictEqual(Object.keys(RV.puntos).sort(), ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'I', 'J', 'K', 'L'], 'puntos A–L del AIP (no hay H)');
+for (const [k, p] of Object.entries(RV.puntos)) { assert(inSantiago(p.lat, p.lon), 'punto ' + k + ' en el área de Santiago'); assert(/^\d{2}°\d{2}’\d{2}” S · \d{3}°\d{2}’\d{2}” W$/.test(p.dms), 'dms de ' + k + ': ' + p.dms); }
+const rvd = (a, b) => R.inv(RV.puntos[a], RV.puntos[b]).nm;
+near(rvd('I', 'J'), 2.6, 0.1, 'PELDEHUE → TORTOLAS ≈ 2,6 NM (3′07″ de longitud a 33°S)'); near(rvd('J', 'K'), 6.9, 0.2, 'TORTOLAS → POLPAICO ≈ 6,9 NM');
+// las rutas con puntos van en el sentido que dice el AIP: salidas hacia el Weste (longitud más al oeste cada vez), llegadas hacia el Este
+const lonsOf = r => r.pts.map(k => RV.puntos[k].lon);
+const west = ls => ls.every((v, i) => i === 0 || v < ls[i - 1]), east = ls => ls.every((v, i) => i === 0 || v > ls[i - 1]);
+const rid = new Set(), RVT = new Set(['S', 'L', 'X', 'N']);
+for (const r of RV.rutas) {
+  assert(!rid.has(r.id), 'id único ' + r.id); rid.add(r.id);
+  assert(RVT.has(r.tp) && r.grupo && r.texto && r.ref && r.fecha && r.ads.length, 'campos de ' + r.id);
+  for (const a of r.ads) ad(a);
+  for (const k of r.pts || []) assert(RV.puntos[k], r.id + ': punto ' + k + ' existe');
+  assert(!/@/.test(JSON.stringify(r)), r.id + ': sin correos');
+  if (r.rng) assert(r.rng.length === 2 && r.rng.every(v => v >= 0 && v <= 360), 'rango de rumbos de ' + r.id);
+}
+const byG = (g, tp) => RV.rutas.find(r => r.grupo.startsWith(g) && r.tp === tp);
+assert(west(lonsOf(byG('Salida Polpaico', 'S'))) && west(lonsOf(byG('Salida Padre Hurtado', 'S'))), 'las salidas por Polpaico y Padre Hurtado van hacia el Weste');
+assert(east(lonsOf(byG('Llegada Padre Hurtado', 'L'))), 'la llegada por Padre Hurtado va hacia el Este');
+assert.deepStrictEqual(byG('Llegada Polpaico', 'L').pts, ['K', 'J', 'L'], 'llegada Polpaico: K → J → L');
+const cnt = (a, tp) => RV.rutas.filter(r => r.tp === tp && r.ads.includes(a)).length;
+assert(cnt('SCTB', 'S') >= 8 && cnt('SCTB', 'L') >= 9 && cnt('SCLC', 'S') >= 5 && cnt('SCLC', 'L') >= 9, `rutas por aeródromo: SCTB ${cnt('SCTB', 'S')}/${cnt('SCTB', 'L')}, SCLC ${cnt('SCLC', 'S')}/${cnt('SCLC', 'L')}`);
+// un rumbo del AIP que cae en la salida «Hacia el Sur»: SCTB → SCRG sale hacia ≈ 190°
+const inR = (b, r) => r[0] <= r[1] ? b >= r[0] && b <= r[1] : b >= r[0] || b <= r[1];
+assert(inR(tbrg.brg, byG('Hacia el Sur Baja', 'S').rng) && !inR(tbrg.brg, byG('Hacia el Norte Baja', 'S').rng), 'SCTB → SCRG corresponde a la salida al Sur, no a la del Norte');
+assert(inR(10, byG('Hacia el Norte Baja', 'S').rng) && inR(350, byG('Hacia el Norte Baja', 'S').rng), 'el rango del Norte cruza los 360°');
+console.log('PASS: ruta.js (geodesia, viento, plan por tramos, cruce de espacios, límites verticales), ' + ESP.length + ' espacios aéreos, ' + CAN.items.length + ' trazos de rutas visuales y ' + RV.rutas.length + ' rutas de texto del AIP (ENR 7.1–7.8) con ' + Object.keys(RV.puntos).length + ' puntos publicados.');

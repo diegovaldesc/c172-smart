@@ -37,13 +37,13 @@
     topo: () => L.tileLayer('https://tile.opentopomap.org/{z}/{x}/{y}.png', { maxZoom: 17, attribution: '© <a href="https://opentopomap.org" target="_blank" rel="noopener">OpenTopoMap</a> (CC-BY-SA) · © OpenStreetMap' }),
   };
 
-  let CAN = { items: [], labels: [] };
+  let CAN = { items: [], labels: [] }, RV = { puntos: {}, rutas: [] };
   let map = null, ESP = [], adReady = false, route = [], cfg = store.get(LS_MAP, { layers: {}, base: 'osm' });
   let baseLayer = null, groupLayers = {}, adMarkers = [], routeLine = null, routeHalo = null, ptMarkers = [], legMarkers = [], tapPopup = null, fitted = false;
   let lastPlan = null, syncing = false;
 
   // ---------- ruta ----------
-  const label = (p, i) => p.i || ('P' + (i + 1));
+  const label = (p, i) => p.i || p.w || ('P' + (i + 1));          // i = aeródromo; w = punto geográfico publicado en el AIP (ENR 7.7)
   const ptOf = a => ({ lat: a.lat, lon: a.lon, i: a.i, n: a.n });
   const A = () => window.AD;
   function fmtLL(p) {
@@ -52,7 +52,7 @@
   }
   function loadRoute() {
     const raw = store.get(LS_ROUTE, []);
-    route = (Array.isArray(raw) ? raw : []).filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lon)).map(p => ({ lat: p.lat, lon: p.lon, ...(p.i ? { i: String(p.i), n: p.n ? String(p.n) : '' } : {}) }));
+    route = (Array.isArray(raw) ? raw : []).filter(p => p && Number.isFinite(p.lat) && Number.isFinite(p.lon)).map(p => ({ lat: p.lat, lon: p.lon, ...(p.i ? { i: String(p.i), n: p.n ? String(p.n) : '' } : p.w ? { w: String(p.w) } : {}) }));
   }
   const saveRoute = () => store.set(LS_ROUTE, route);
 
@@ -245,6 +245,19 @@
       }
     }
     for (const l of CAN.labels) g.addLayer(L.marker(l.p, { pane: 'vrc', interactive: false, keyboard: false, icon: L.divIcon({ className: 'rt-vlw', html: h('span', l.t, 'rt-vl'), iconSize: [0, 0] }) }));
+    // puntos geográficos publicados en ENR 7.7 (coordenadas del AIP)
+    for (const [k, p] of Object.entries(RV.puntos)) {
+      const el = h('span', null, 'rt-pp'); el.append(h('i'), document.createTextNode(p.n));
+      const m = L.marker([p.lat, p.lon], { pane: 'vrc', keyboard: false, title: p.n, icon: L.divIcon({ className: 'rt-ppw', html: el, iconSize: [0, 0] }) });
+      m.bindPopup(() => {
+        const d = h('div', null, 'rt-pop');
+        d.append(h('b', `${p.n} (punto ${k})`), h('small', p.d), h('small', p.dms), h('small', 'Punto geográfico publicado en AIP Vol. I, ENR 7.7.', 'rt-spn'));
+        const b = h('button', '+ Agregar a la ruta', 'rt-pbtn'); b.type = 'button';
+        b.addEventListener('click', () => { add({ lat: p.lat, lon: p.lon, w: p.n }); map.closePopup(); });
+        d.append(b); return d;
+      }, { maxWidth: 280, className: 'rt-popup' });
+      g.addLayer(m);
+    }
     applyGroup('vrc');
   }
   // Pone el trazado como puntos de giro de la ruta (el primero/último, si caen junto a un aeródromo, pasan a ser ese aeródromo)
@@ -286,6 +299,64 @@
     });
   }
 
+  // ---------- texto de las rutas visuales del AIP (ENR 7.1 a 7.8) ----------
+  const inRange = (b, r) => r[0] <= r[1] ? b >= r[0] && b <= r[1] : b >= r[0] || b <= r[1];
+  const rvPoint = id => { const p = RV.puntos[id]; return { lat: p.lat, lon: p.lon, w: p.n }; };
+  // Los puntos con coordenadas publicadas entran a la ruta: las salidas justo después del origen, las llegadas justo antes del destino
+  function useRv(r) {
+    const pts = r.pts.map(rvPoint);
+    if (r.tp === 'L' && route.length >= 2) route.splice(route.length - 1, 0, ...pts);
+    else if (r.tp === 'S' && route.length >= 1) route.splice(1, 0, ...pts);
+    else route.push(...pts);
+    edited(); fitRoute();
+  }
+  function rvItem(r, sug, to) {
+    const d = h('details', null, 'rt-rvi' + (sug ? ' sug' : '')); d.open = !!sug;
+    const s = h('summary'); s.append(h('b', r.grupo + (r.titulo ? ' · ' + r.titulo : '')));
+    if (sug) s.append(h('em', 'según el rumbo de tu ruta'));
+    d.append(s);
+    d.append(h('p', r.texto, 'rt-rvt'));
+    if (r.com) { const p = h('p', null, 'rt-rvc'); p.append(h('b', 'Comunicaciones: '), document.createTextNode(r.com)); d.append(p); }
+    (r.notas || []).forEach(t => d.append(h('p', t, 'rt-rvn')));
+    if (r.pts) {
+      const p = h('p', null, 'rt-rvp'); p.append(h('b', 'Puntos publicados: '), document.createTextNode(r.pts.map(k => RV.puntos[k].n).join(' → ')));
+      d.append(p);
+      const b = h('button', to === 'L' ? 'Agregar los puntos antes del destino' : 'Agregar los puntos después del origen', 'rt-pbtn'); b.type = 'button';
+      b.addEventListener('click', () => useRv(r)); d.append(b);
+      d.append(h('small', 'El tramo hasta el primer punto sigue una ruta descrita por referencias de terreno (sin coordenadas): en el mapa queda en línea recta; ajústalo con puntos propios.', 'rt-rvw'));
+    }
+    d.append(h('small', `AIP Vol. I, ${r.ref} · edición ${r.fecha}`, 'rt-rvf'));
+    return d;
+  }
+  function renderRv() {
+    const box = $('rt_rv'); if (!box) return;
+    box.replaceChildren();
+    const o = route.length ? route[0].i : null, dst = route.length > 1 ? route[route.length - 1].i : null;
+    const seen = r => (r.tp === 'S' && o && r.ads.includes(o)) || (r.tp === 'L' && dst && r.ads.includes(dst)) || ((r.tp === 'X' || r.tp === 'N') && ((o && r.ads.includes(o)) || (dst && r.ads.includes(dst))));
+    const list = RV.rutas.filter(seen);
+    box.hidden = !list.length; if (!list.length) return;
+    const outB = route.length > 1 ? R.inv(route[0], route[1]).brg : null, inB = route.length > 1 ? R.inv(route[route.length - 1], route[route.length - 2]).brg : null;
+    box.append(h('h3', 'Rutas visuales publicadas en el AIP (ENR 7)', 'subhead'));
+    box.append(h('p', 'Texto del AIP tal como se publica: rutas por referencias de terreno, altitudes y comunicaciones. Si tu ruta sale o llega por un rumbo que coincide con alguna, la abro. El AIP vigente y el NOTAM mandan.', 'hint'));
+    const group = (title, items, tp) => {
+      if (!items.length) return;
+      box.append(h('h4', title, 'rt-rvh'));
+      const flag = r => !!(r.rng && (tp === 'S' ? outB : tp === 'L' ? inB : null) != null && inRange(tp === 'S' ? outB : inB, r.rng));
+      items.slice().sort((a, b) => flag(b) - flag(a)).forEach(r => box.append(rvItem(r, flag(r), tp)));
+    };
+    group(`Salidas desde ${o}${outB != null ? ` · tu ruta sale hacia ${pad3(outB)}° verdadero` : ''}`, list.filter(r => r.tp === 'S'), 'S');
+    group(`Llegadas a ${dst}${inB != null ? ` · tu ruta llega desde ${pad3(inB)}° verdadero` : ''}`, list.filter(r => r.tp === 'L'), 'L');
+    group('Cruce de la ciudad y avisos', list.filter(r => r.tp === 'X' || r.tp === 'N'), 'X');
+  }
+  async function loadRv() {
+    try {
+      const d = window.RV_DATA || await (await fetch('data/rutas_visuales.json')).json();
+      RV = { puntos: d.puntos || {}, rutas: d.rutas || [] };
+      if (map) { drawCanales(); Object.keys(groupLayers).forEach(applyGroup); }
+      renderRv();
+    } catch (e) { /* sin los textos de ENR 7; el resto sigue funcionando */ }
+  }
+
   // ---------- ruta en el mapa ----------
   function numIcon(i, text, drag) {
     const el = h('div', null, 'rt-wp' + (drag ? ' drag' : ''));
@@ -302,8 +373,9 @@
       routeLine = L.polyline(ll, { pane: 'rutaPane', color: '#f0a868', weight: 4, opacity: 1, interactive: false }).addTo(map);
     } else { routeHalo.setLatLngs(ll); routeLine.setLatLngs(ll); }
     route.forEach((p, i) => {
-      const m = L.marker([p.lat, p.lon], { icon: numIcon(i, label(p, i), !p.i), draggable: !p.i, pane: 'rutaPane', zIndexOffset: 1000, keyboard: false, title: label(p, i) });
-      if (!p.i) {
+      const fixed = !!(p.i || p.w);                                   // aeródromos y puntos del AIP no se arrastran
+      const m = L.marker([p.lat, p.lon], { icon: numIcon(i, label(p, i), !fixed), draggable: !fixed, pane: 'rutaPane', zIndexOffset: 1000, keyboard: false, title: label(p, i) });
+      if (!fixed) {
         m.on('drag', ev => { const q = ev.target.getLatLng(); route[i] = { lat: q.lat, lon: q.lng }; const l2 = route.map(x => [x.lat, x.lon]); routeLine.setLatLngs(l2); routeHalo.setLatLngs(l2); });
         m.on('dragend', ev => { const q = ev.target.getLatLng(); route[i] = { lat: +q.lat.toFixed(5), lon: +q.lng.toFixed(5) }; edited(); });
       }
@@ -330,7 +402,7 @@
       li.append(h('b', String(i + 1), 'rt-n'));
       const t = h('span', null, 'rt-nm');
       const ad = p.i && A() ? A().get(p.i) : null;
-      t.append(h('em', p.i ? `${p.i} · ${ad ? ad.n : (p.n || '')}` : 'Punto en el mapa'), h('small', i === 0 ? 'Origen' + (route.length > 1 ? '' : '') : i === route.length - 1 ? 'Destino' : 'Punto intermedio'));
+      t.append(h('em', p.i ? `${p.i} · ${ad ? ad.n : (p.n || '')}` : p.w ? `${p.w} · punto publicado (AIP ENR 7.7)` : 'Punto en el mapa'),h('small', i === 0 ? 'Origen' + (route.length > 1 ? '' : '') : i === route.length - 1 ? 'Destino' : 'Punto intermedio'));
       if (!p.i) t.append(h('small', fmtLL(p)));
       li.append(t);
       const btn = (txt, lbl, fn, dis) => { const b = h('button', txt, 'rt-ib'); b.type = 'button'; b.setAttribute('aria-label', lbl); b.disabled = !!dis; b.addEventListener('click', fn); return b; };
@@ -430,7 +502,7 @@
     void pl;
   }
 
-  function renderAll() { renderList(); renderRoute(); renderVrc(); renderPlan(); }
+  function renderAll() { renderList(); renderRoute(); renderVrc(); renderRv(); renderPlan(); }
 
   // ---------- búsqueda ----------
   function bindSearch() {
@@ -497,7 +569,7 @@
     if (typeof L === 'undefined') { $('rt_hint').textContent = 'No se pudo cargar el mapa (Leaflet).'; return; }
     loadRoute(); bindUI();
     renderList(); renderPlan();
-    loadEsp(); loadCan();
+    loadEsp(); loadCan(); loadRv();
     if (A()) A().whenReady(() => {
       adReady = true;
       // sin ruta guardada, parte con el origen y destino que ya elegiste en Inicio
