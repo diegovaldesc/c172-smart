@@ -6,15 +6,12 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 // ---------- Datos del modelo (se leen de la pestaña "Avión") ----------
 let LIM = {}, TAKEOFF = [], LANDING = [];
-const DEFAULT_TAB = [[0, 1, 1], [2000, 1, 1]];
 
 function parseTable(id) {
-  const rows = $(id).value.split('\n')
-    .map(l => l.split(/[,;\s]+/).map(parseFloat))
-    .filter(r => r.length >= 3 && r.slice(0, 3).every(isFinite))
-    .map(r => r.slice(0, 3))
+  const rows = $(id).value.trim().split('\n')
+    .map(l => l.trim().split(/[,;\s]+/).map(Number))
     .sort((a, b) => a[0] - b[0]);
-  return rows.length >= 2 ? rows : DEFAULT_TAB;
+  return rows.length >= 2 && rows.every((r, i) => r.length === 3 && r.every(Number.isFinite) && r[1] > 0 && r[2] >= r[1] && (!i || r[0] > rows[i - 1][0])) ? rows : null;
 }
 // ---------- Unidades ----------
 // Internamente todo se calcula en lb y galones US; los campos y resultados se muestran en la unidad elegida.
@@ -141,6 +138,8 @@ function calcWB() {
   if (bA > LIM.bagAMax) add(`Equipaje A supera ${dW(LIM.bagAMax)}.`, 'bad');
   if (bB > LIM.bagBMax) add(`Equipaje B supera ${dW(LIM.bagBMax)}.`, 'bad');
   if (bA + bB > LIM.bagTotal) add(`Equipaje total supera ${dW(LIM.bagTotal)}.`, 'bad');
+  if (gal < LIM.taxi) add('El combustible cargado no alcanza para el rodaje indicado.', 'bad');
+  if (!inEnvelope(zfw.w, zfw.cg)) add('El CG queda fuera de la envolvente al consumir el combustible.', 'bad');
   if (gal > LIM.fuelMax) add(`Combustible supera los ${dF(LIM.fuelMax, 0)} utilizables.`, 'bad');
   if (!msgs.length) add(`Dentro de límites. Margen de peso al MTOW: ${dW(LIM.mtow - toff.w)}.`, 'ok');
   if (toff.w <= LIM.mtow && gal < LIM.fuelMax) {
@@ -172,7 +171,7 @@ function drawChart(points) {
   s += `<rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="none" stroke="#bdb39f"/>`;
   // etiquetas de límites
   s += `<text x="${(X(LIM.fwdMin) + X(LIM.aft)) / 2}" y="${Y(LIM.mtow) + 13}" fill="#244632" font-size="11" font-weight="700" text-anchor="middle">MTOW ${dW(LIM.mtow)}</text>`;
-  s += `<text x="${(X(LIM.fwdMin) + X(LIM.aft)) / 2}" y="${Y(LIM.fwdKnee * 0.8 + wBot * 0.2)}" fill="#3d6b4f" font-size="12" font-weight="700" text-anchor="middle" opacity=".55">ENVOLVENTE OPERACIONAL</text>`;
+  s += `<text x="${(X(LIM.fwdMin) + X(LIM.aft)) / 2}" y="${Y(LIM.fwdKnee * 0.8 + wBot * 0.2)}" fill="#3d6b4f" font-size="9" font-weight="700" text-anchor="middle" opacity=".55">ENVOLVENTE OPERACIONAL</text>`;
   s += `<text x="${X(LIM.aft) + 9}" y="${(Y(wBot) + Y(LIM.mtow)) / 2}" fill="#6e1f18" font-size="10" transform="rotate(90 ${X(LIM.aft) + 9} ${(Y(wBot) + Y(LIM.mtow)) / 2})" text-anchor="middle">Límite trasero ${fmt(LIM.aft, 1)} in</text>`;
   s += `<text x="${X(LIM.fwdMin) - 6}" y="${(Y(wBot) + Y(LIM.fwdKnee)) / 2}" fill="#6e1f18" font-size="10" transform="rotate(-90 ${X(LIM.fwdMin) - 6} ${(Y(wBot) + Y(LIM.fwdKnee)) / 2})" text-anchor="middle">Límite delantero ${fmt(LIM.fwdMin, 1)} in</text>`;
   s += `<text x="${(L + W - R) / 2}" y="${H - B + 28}" fill="#6f6a5e" font-size="11" text-anchor="middle">Brazo / posición del CG (in desde la referencia)</text>`;
@@ -186,11 +185,11 @@ function drawChart(points) {
     const fill = ok ? color : '#a8342a';
     s += `<circle cx="${px}" cy="${py}" r="6" fill="${i === 0 ? '#fffdf8' : fill}" stroke="${i === 0 ? fill : '#fff'}" stroke-width="${i === 0 ? 2.5 : 1.5}"/>`;
     const left = px > (X(LIM.fwdMin) + X(LIM.aft)) / 2;
-    s += `<text x="${left ? px - 10 : px + 10}" y="${i === 0 ? py - 9 : py + 4}" fill="#26292c" font-size="11" font-weight="700" text-anchor="${left ? 'end' : 'start'}">${name}</text>`;
+    s += `<text x="${left ? px - 10 : px + 10}" y="${i === 0 ? py - 13 : py + 16}" fill="#26292c" font-size="11" font-weight="700" text-anchor="${left ? 'end' : 'start'}">${name}</text>`;
   });
   // leyenda
   s += `<text x="${L}" y="16" fill="#26292c" font-size="12" font-weight="700">Envolvente de CG · categoría normal</text>`;
-  s += `<text x="${W - R}" y="16" fill="#6f6a5e" font-size="10" text-anchor="end">verde = dentro · rojo = fuera</text>`;
+  s += `<text x="${W - R}" y="330" fill="#6f6a5e" font-size="10" text-anchor="end">verde = dentro · rojo = fuera</text>`;
   $('chart').innerHTML = s;
 }
 
@@ -203,7 +202,7 @@ function drawRunway(svgId, cfg) {
   const X0 = 16, X1 = 464, Y0 = 62, Y1 = 112, YC = 87;
   // pista mucho más larga de lo necesario: se dibuja solo el primer tramo, con marca de corte
   const reach = Math.max(cfg.need, cfg.b), cut = cfg.len > reach * 2.2;
-  const span = Math.max(cut ? reach * 1.9 : cfg.len, cfg.need, cfg.b) * 1.04;
+  const span = Math.max(1, cut ? reach * 1.9 : cfg.len, cfg.need, cfg.b) * 1.08;
   const sx = ft => X0 + ft / span * (X1 - X0);
   const rEnd = cut ? X1 : sx(cfg.len);
   let s = '';
@@ -232,29 +231,29 @@ function drawRunway(svgId, cfg) {
   // margen 25 %
   const col = cfg.ok === 'ok' ? '#3d6b4f' : cfg.ok === 'warn' ? '#a87414' : '#a8342a';
   s += `<line x1="${sx(cfg.need)}" y1="${Y0 - 26}" x2="${sx(cfg.need)}" y2="${Y1 + 6}" stroke="${col}" stroke-width="2" stroke-dasharray="4 3"/>`;
-  s += `<text x="${sx(cfg.need)}" y="${Y0 - 30}" fill="${col}" font-size="12" font-weight="700" text-anchor="${sx(cfg.need) > 380 ? 'end' : 'start'}">+25 %: ${fmt(cfg.need)} ft</text>`;
+  s += `<text x="${sx(cfg.need)}" y="22" fill="${col}" font-size="12" font-weight="700" text-anchor="${sx(cfg.need) > 380 ? 'end' : 'start'}">+25 %: ${fmt(cfg.need)} ft</text>`;
 
   // marcadores y aviones
   if (cfg.kind === 'to') {
     s += PLANE(sx(cfg.a), YC, '#fffdf8');
-    s += `<text x="${sx(cfg.a)}" y="${Y1 + 20}" fill="#9c4214" font-size="12" font-weight="700" text-anchor="middle">Despegue ${fmt(cfg.a)} ft</text>`;
+    s += `<text x="16" y="158" fill="#9c4214" font-size="12" font-weight="700" text-anchor="start">Despegue ${fmt(cfg.a)} ft</text>`;
     s += `<circle cx="${sx(cfg.b)}" cy="${YC - 34}" r="4" fill="#26292c"/>`;
-    s += `<text x="${sx(cfg.b)}" y="${YC - 42}" fill="#26292c" font-size="12" text-anchor="middle">50 ft · ${fmt(cfg.b)} ft</text>`;
-    s += `<text x="${X0}" y="${Y1 + 36}" fill="#6f6a5e" font-size="12">Inicio de carrera</text>`;
+    s += `<text x="16" y="180" fill="#26292c" font-size="12" text-anchor="start">50 ft · ${fmt(cfg.b)} ft</text>`;
+    s += `<text x="${X0}" y="206" fill="#6f6a5e" font-size="12">Inicio de carrera</text>`;
   } else {
     s += PLANE(sx(cfg.a), YC, '#fffdf8') ;
     s += PLANE(sx(cfg.b), YC, '#d9b43a');
     s += `<circle cx="${X0}" cy="${YC - 34}" r="4" fill="#26292c"/>`;
     s += `<text x="${X0 + 8}" y="${YC - 42}" fill="#26292c" font-size="12">Umbral a 50 ft</text>`;
-    s += `<text x="${sx(cfg.a)}" y="${Y1 + 20}" fill="#6f6a5e" font-size="12" font-weight="700" text-anchor="middle">Toma ${fmt(cfg.a)} ft</text>`;
-    s += `<text x="${sx(cfg.b)}" y="${Y1 + 34}" fill="#8a6a10" font-size="12" font-weight="700" text-anchor="middle">Parada ${fmt(cfg.b)} ft</text>`;
+    s += `<text x="16" y="158" fill="#6f6a5e" font-size="12" font-weight="700" text-anchor="start">Toma ${fmt(cfg.a)} ft</text>`;
+    s += `<text x="16" y="180" fill="#8a6a10" font-size="12" font-weight="700" text-anchor="start">Parada ${fmt(cfg.b)} ft</text>`;
   }
   // final de pista
   if (cut) {
     s += `<path d="M${X1 - 22} ${Y1 + 3} L${X1 - 10} ${Y0 - 3}" stroke="#e4dfd0" stroke-width="8"/>`;
-    s += `<text x="${X1}" y="${Y1 + 50}" fill="#26292c" font-size="12" text-anchor="end">Pista de ${fmt(cfg.len)} ft (se muestra el primer tramo)</text>`;
+    s += `<text x="${X1}" y="222" fill="#26292c" font-size="12" text-anchor="end">Pista de ${fmt(cfg.len)} ft (se muestra el primer tramo)</text>`;
   } else {
-    s += `<text x="${rEnd}" y="${Y1 + 50}" fill="#26292c" font-size="12" text-anchor="${rEnd > 400 ? 'end' : 'middle'}">Fin de pista: ${fmt(cfg.len)} ft</text>`;
+    s += `<text x="${rEnd}" y="222" fill="#26292c" font-size="12" text-anchor="${rEnd > 400 ? 'end' : 'middle'}">Fin de pista: ${fmt(cfg.len)} ft</text>`;
   }
   if (cfg.b > cfg.len) s += `<text x="${(rEnd + X1) / 2}" y="${YC + 4}" fill="#a8342a" font-size="12" font-weight="700" text-anchor="middle">¡FUERA!</text>`;
   $(svgId).innerHTML = s;
@@ -329,7 +328,7 @@ let fuelNeeded = 0, enrouteFuel = 0;
 const hm = hrs => { const t = Math.round(hrs * 60); return `${Math.floor(t / 60)} h ${String(t % 60).padStart(2, '0')} min`; };
 function calcFuel() {
   const d = num('r_dist'), tas = num('r_tas'), wind = num('r_wind'), burn = num('r_burn') * ff;
-  const gs = Math.max(1, tas - wind);
+  const gs = tas - wind;
   const hrs = d / gs;
   const trip = hrs * burn;
   const resMin = num('r_res');
@@ -339,6 +338,7 @@ function calcFuel() {
   fuelNeeded = total;
   enrouteFuel = trip + climb;
   const over = total > LIM.fuelMax;
+  $('fuel_apply').disabled = over;
   $('fuel_out').innerHTML =
     kpi('Velocidad suelo', fmt(gs) + ' kt') +
     kpi('Tiempo en ruta', hm(hrs)) +
@@ -391,10 +391,10 @@ function renderHome() {
   if (SUM.ld) setRow('sum_ld', SUM.ld.ok, 'Aterrizaje' + (t ? ' · ' + t.i : ''), fitText(SUM.ld));
   const fu = SUM.fuel;
   if (fu) {
-    const cls = fu.need > fu.max || fu.have < fu.need ? 'bad' : 'ok';
+    const cls = fu.need > fu.max || fu.have + 1e-9 < fu.need ? 'bad' : 'ok';
     setRow('sum_fuel', cls, 'Combustible',
       fu.need > fu.max ? `La ruta pide ${dF(fu.need)} y el tanque rinde ${dF(fu.max, 0)}`
-        : fu.have < fu.need ? `Cargado ${dF(fu.have)}, necesitas ${dF(fu.need)}`
+        : fu.have + 1e-9 < fu.need ? `Cargado ${dF(fu.have)}, necesitas ${dF(fu.need)}`
         : `Cargado ${dF(fu.have)} · necesitas ${dF(fu.need)} con reserva`);
   }
 }
@@ -404,7 +404,7 @@ function showSub(panelId) {
   const p = $(panelId);
   if (!p || !p.dataset.seg) return;
   const seg = $(p.dataset.seg);
-  seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.sub === panelId));
+  seg.querySelectorAll('button').forEach(b => { b.classList.toggle('on', b.dataset.sub === panelId); b.setAttribute('aria-selected', String(b.dataset.sub === panelId)); });
   document.querySelectorAll(`[data-seg="${seg.id}"]`).forEach(x => x.classList.toggle('on', x === p));
 }
 function go(tab, open) {
@@ -421,7 +421,35 @@ function go(tab, open) {
 }
 
 // ---------- Eventos ----------
-function recalc() { save(); readModel(); calcWB(); calcPerf(); calcFuel(); renderHome(); }
+function validateInputs() {
+  const invalid = [];
+  document.querySelectorAll('input[type="number"]').forEach(e => {
+    const value = Number(e.value);
+    const signed = ['elev', 'a_elev', 'oat', 'a_oat', 'r_wind'].includes(e.id);
+    const positive = ['w_empty','to_w','ld_w','qnh','a_qnh','r_tas','r_burn','m_mtow','m_ramp','m_refw','m_lbgal','m_fuelmax','to_len','ld_len'].includes(e.id);
+    const bad = e.value.trim() === '' || !Number.isFinite(value) || (!signed && value < 0) || (positive && value <= 0) || (e.min !== '' && value < Number(e.min)) || (e.max !== '' && value > Number(e.max));
+    e.setAttribute('aria-invalid', String(bad));
+    if (bad) invalid.push(e);
+  });
+  const modelOK = LIM.mtow > LIM.fwdKnee && LIM.fwdMin <= LIM.fwdMax && LIM.fwdMax <= LIM.aft;
+  const routeOK = num('r_tas') > num('r_wind');
+  const ok = !invalid.length && TAKEOFF && LANDING && modelOK && routeOK;
+  $('validation').hidden = !!ok;
+  $('validation').textContent = invalid.length ? 'Revisa los campos marcados: faltan valores o están fuera de rango. Los resultados están suspendidos.' : !routeOK ? 'La velocidad suelo debe ser mayor que cero. Revisa TAS y viento en Combustible.' : !modelOK ? 'Revisa los límites de peso y CG en Avión.' : 'Revisa las tablas: al menos dos altitudes distintas, distancias positivas y distancia a 50 ft no menor al recorrido.';
+  return !!ok;
+}
+function recalc() {
+  readModel();
+  if (!validateInputs()) {
+    ['wb_res','wb_msgs','chart','atm_out','a_atm_out','to_out','ld_out','to_fig','ld_fig','fuel_out'].forEach(id => $(id).replaceChildren());
+    ['sum_wb','sum_to','sum_ld','sum_fuel'].forEach(id => setRow(id, 'warn', 'Datos pendientes', 'Revisa los campos y las tablas antes de calcular.'));
+    $('fuel_apply').disabled = true;
+    document.querySelectorAll('[data-copy]').forEach(b => b.disabled = true);
+    return;
+  }
+  save(); calcWB(); calcPerf(); calcFuel(); renderHome();
+  document.querySelectorAll('[data-copy]').forEach(b => b.disabled = false);
+}
 
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-go],[data-tab]');
@@ -441,7 +469,7 @@ document.querySelector('[data-copy="ld"]').addEventListener('click', () => {
   recalc();
 });
 $('fuel_apply').addEventListener('click', () => {
-  $('f_gal').value = Math.min(Math.round(LIM.fuelMax / ff), Math.ceil((fuelNeeded + LIM.taxi) / ff));
+  $('f_gal').value = Math.min(LIM.fuelMax / ff, Math.ceil(fuelNeeded / ff * 10) / 10);
   recalc();
   go('wb');
 });
@@ -451,6 +479,11 @@ $('fuel_route_apply').addEventListener('click', () => {
 });
 $('go_plan').addEventListener('click', () => go('wb'));
 
+document.querySelectorAll('.grid input').forEach(e => { e.setAttribute('aria-label', e.closest('tr').cells[0].textContent + (e.id === 'a_empty' ? ' · brazo (in)' : '')); });
+document.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-selected', String(b.classList.contains('on'))));
 load();
 curW = uw(); curF = uf();
 recalc();
+
+
+
