@@ -465,7 +465,7 @@ function calcPerf() {
     const p = condPending(w), m = condMsg(w);
     $(w + '_cond').innerHTML = m ? `<div class="msg warn">${m}</div>` : '';
     if (s) s.prov = p;
-    if (p.length) $(notes).innerHTML = '<div class="msg warn">Resultado provisorio: faltan confirmar las condiciones (arriba).</div>' + $(notes).innerHTML;
+    if (p.length) $(notes).innerHTML = `<div class="msg warn">Resultado provisorio: faltan confirmar las condiciones de la ${w === 'dep' ? 'salida' : 'llegada'}. <button type="button" class="linkbtn" data-go="pista">Confirmarlas (paso 2)</button></div>` + $(notes).innerHTML;
   });
 }
 
@@ -558,7 +558,7 @@ function calcTrip() {
   const vari = num('ru_var');
   const winds = pts.slice(1).map((q, i) => windOf(pts[i], q));
   const pl = RUTA.plan(pts, { tas: prm.tas, gph: prm.gph, climb: prm.climb, taxi: prm.taxi, resMin: prm.resMin, vari, winds: winds.map(w => w ? { dir: w.dir, spd: w.spd } : null) });
-  if (!pl.ok) { TRIP = { err: 'El viento de costado iguala o supera la velocidad verdadera en algún tramo: no hay avance. Revisa el viento (paso 3).', prm, pts, pl, winds }; return renderCarga(); }
+  if (!pl.ok) { TRIP = { err: 'El viento de costado iguala o supera la velocidad verdadera en algún tramo: no hay avance. Revisa el viento (paso 2).', prm, pts, pl, winds }; return renderCarga(); }
 
   // alterno (opcional): un tramo más desde el destino, a la misma altitud, con el viento del último tramo y sin ascenso (del lado conservador)
   const AD = window.AD, adAlt = AD ? AD.get($('alt_icao').value) : null, dest = pts[pts.length - 1];
@@ -578,9 +578,9 @@ function calcTrip() {
   // wind: 'ok' (todos los tramos con viento vigente) | 'none' | 'partial' | 'stale'. Si no es 'ok' el resultado es provisorio: no se da por bueno un cálculo con calma supuesta.
   const have_w = winds.filter(Boolean), notes = [];
   const wind = !have_w.length ? 'none' : have_w.length < winds.length ? 'partial' : have_w.some(w => w.stale) ? 'stale' : 'ok';
-  if (wind === 'none') notes.push('Sin viento definido: el cálculo supone aire en calma. Defínelo en el paso 3.');
-  else if (wind === 'partial') notes.push('Falta el viento de algún tramo: ahí se supuso aire en calma (paso 3).');
-  if (have_w.some(w => w.stale)) notes.push('Parte del viento viene de un pronóstico viejo o de otra hora o altitud: actualízalo en el paso 3.');
+  if (wind === 'none') notes.push('Sin viento definido: el cálculo supone aire en calma. Defínelo en el paso 2.');
+  else if (wind === 'partial') notes.push('Falta el viento de algún tramo: ahí se supuso aire en calma (paso 2).');
+  if (have_w.some(w => w.stale)) notes.push('Parte del viento viene de un pronóstico viejo o de otra hora o altitud: actualízalo en el paso 2.');
   TRIP = { pts, prm, pl, winds, wind, alt, galAlt, total, have, cap, over, short, landGal, trip: prm.taxi + pl.galEnroute, cMin, landMin: burn > 0 ? Math.max(0, landGal) / burn * 60 : 0, reach: reachWith(have), reachFull: reachWith(cap), notes, flightMin: pl.min + (alt ? alt.min : 0) };
   enrouteFuel = pl.galEnroute;
   renderCarga();
@@ -591,7 +591,7 @@ function renderCarga() {
   V.replaceChildren(); $('fuel_tbl').replaceChildren(); $('fuel_phases').replaceChildren(); $('fuel_out').replaceChildren(); $('fuel_ans').replaceChildren(); $('fuel_note').textContent = '';
   $('fuel_sub').hidden = true; $('fuel_apply').disabled = true;
   const verdict = (cls, title, text) => { const d = mk('div', null, 'verdict ' + cls); d.append(mk('b', title), mk('span', text)); V.append(d); return d; };
-  if (!T || T.none) { verdict('warn', 'Todavía no hay ruta', 'Arma la ruta en el paso 2 y aquí verás si el combustible alcanza.'); return; }
+  if (!T || T.none) { verdict('warn', 'Todavía no hay ruta', 'Arma la ruta en el paso 1 y aquí verás si el combustible alcanza.'); return; }
   if (T.err) { verdict('bad', 'No se puede calcular', T.err); return; }
   const { prm, pl, alt } = T, resMin = prm.resMin;
   if (T.over) verdict('bad', 'No llegas sin escala', `La ruta pide ${dF(T.total)} y los tanques rinden ${dF(T.cap, 0)}. Con tanques llenos y ${fmt(resMin)} min de reserva alcanzas unas ${fmt(T.reachFull)} NM. Haz escala, baja las RPM o acepta menos reserva.`);
@@ -601,7 +601,7 @@ function renderCarga() {
     const how = { none: 'Se calculó con aire en calma.', partial: 'En los tramos sin dato se supuso aire en calma.', stale: 'El pronóstico de viento es viejo o de otra hora o altitud.' }[T.wind];
     const d = verdict('warn', { none: 'Provisorio: sin viento definido', partial: 'Provisorio: falta el viento de algún tramo', stale: 'Provisorio: el viento está desactualizado' }[T.wind],
       `${how} Con lo cargado alcanza, pero no des por buenas estas cifras hasta definir el viento.`);
-    const b = mk('button', 'Definir el viento (paso 3)', 'linkbtn'); b.type = 'button'; b.dataset.go = 'viento'; d.append(b);
+    const b = mk('button', 'Definir el viento (paso 2)', 'linkbtn'); b.type = 'button'; b.dataset.go = 'viento'; d.append(b);
   }
   else verdict('ok', 'El combustible alcanza', `Cubre el viaje, la reserva de ${fmt(resMin)} min${alt ? ' y el alterno' : ''}.`);
   // con el veredicto provisorio el aviso de viento ya está dicho arriba; si no alcanza, se agrega
@@ -652,7 +652,7 @@ function renderCarga() {
   $('fuel_tbl').append(th, tb, tf);
   $('fuel_note').textContent = (prm.poh
     ? `Ascenso (Fig. 5-7) y crucero (Fig. 5-8) del POH, mezcla pobre, a ${dW(MODEL.cruise.w)} (el POH no corrige por peso: con menos peso rendirá algo mejor)${prm.extra ? `, con +${fmt(prm.extra)} % de consumo` : ''}. `
-    : 'Velocidad y consumo son los que ingresaste en el paso 1; el combustible de ascenso se suma una vez. ') +
+    : 'Velocidad y consumo son los que ingresaste en «Tu avión»; el combustible de ascenso se suma una vez. ') +
     'Cada tramo usa su propio viento. No se modela el descenso: se calcula crucero hasta el destino (del lado conservador). La distancia es en línea recta entre los puntos de la ruta. Valores de avión nuevo: uno con horas consume algo más, para eso está la reserva.';
 }
 
@@ -663,9 +663,14 @@ function renderStatus(valid = true) {
   $('chip').textContent = pts.length ? `${ptLabel(pts[0], 0)} → ${pts.length > 1 ? ptLabel(pts[pts.length - 1], pts.length - 1) : '····'}${pts.length > 2 ? ` (+${pts.length - 2})` : ''}` : 'Sin ruta';
   $('seg_dep').textContent = pts.length && pts[0].i ? pts[0].i : '';
   $('seg_arr').textContent = pts.length > 1 && pts[pts.length - 1].i ? pts[pts.length - 1].i : '';
+  $('perf_seg_dep').textContent = $('seg_dep').textContent; $('perf_seg_arr').textContent = $('seg_arr').textContent;
+  const exEmpty = emptyIsExample();
+  $('plane_sum').textContent = MODEL.nombre + (exEmpty ? ' · peso vacío de ejemplo' : ` · vacío ${dW(num('w_empty') * wf)}`); $('plane_sum').className = exEmpty ? 'warn' : '';
+  const goTo = (id, target, open = '') => { const b = $(id); b.dataset.go = target; b.dataset.open = open; };
   $('model_specs').textContent = `MTOW ${dW(LIM.mtow)} · ${dF(LIM.fuelMax, 0)} utilizables · Fuente: ${MODEL.poh}`;
   if (!valid) { ['st_fuel', 'st_wb', 'st_rwy'].forEach(id => setPill(id, 'warn', 'Revisa los datos')); return; }
   const T = TRIP;
+  goTo('st_fuel', !T || T.none ? 'ruta' : !T.err && !T.over && !T.short && T.wind !== 'ok' ? 'viento' : 'carga');   // «Sin viento» lleva a definir el viento
   if (!T || T.none) setPill('st_fuel', 'off', 'Sin ruta');
   else if (T.err) setPill('st_fuel', 'bad', 'No se calcula');
   else if (T.over) setPill('st_fuel', 'bad', 'No llegas');
@@ -673,15 +678,17 @@ function renderStatus(valid = true) {
   else if (T.wind !== 'ok') setPill('st_fuel', 'warn', { none: 'Sin viento', partial: 'Falta viento', stale: 'Viento viejo' }[T.wind]);   // provisorio: no es un «sobran» confiable
   else setPill('st_fuel', 'ok', `Sobran ${dF(T.have - T.total)}`);
   const w = SUM.wb;
+  if (w && w.ok && exEmpty) goTo('st_wb', 'plane'); else goTo('st_wb', 'carga', 'wb');   // «Peso ejemplo» lleva a poner el peso vacío de tu matrícula
   if (!w) setPill('st_wb', 'off', '—');
   else if (!w.ok) setPill('st_wb', 'bad', 'Fuera de límites');
-  else if (emptyIsExample()) setPill('st_wb', 'warn', 'Peso ejemplo');   // dentro de límites, pero con el peso vacío de ejemplo del POH
+  else if (exEmpty) setPill('st_wb', 'warn', 'Peso ejemplo');   // dentro de límites, pero con el peso vacío de ejemplo del POH
   else setPill('st_wb', 'ok', 'Dentro de límites');
   const pr = [SUM.to, SUM.ld].filter(Boolean);
-  if (!pr.length || !routePts().length) setPill('st_rwy', 'off', routePts().length ? '—' : 'Sin ruta');   // sin ruta no hay aeródromos: «cabes» sería un dato sin respaldo
+  if (!pr.length || !routePts().length) { setPill('st_rwy', 'off', routePts().length ? '—' : 'Sin ruta'); goTo('st_rwy', routePts().length ? 'perf' : 'ruta'); }   // sin ruta no hay aeródromos: «cabes» sería un dato sin respaldo
   else {
     const rank = { ok: 0, warn: 1, bad: 2 }, worst = pr.reduce((a, b) => (rank[b.ok] > rank[a.ok] ? b : a)), cls = worst.ok;
     const prov = (SUM.to && SUM.to.prov && SUM.to.prov.length) || (SUM.ld && SUM.ld.prov && SUM.ld.prov.length);
+    goTo('st_rwy', cls === 'ok' && prov ? 'pista' : 'perf');                       // «Sin confirmar» lleva a confirmar las condiciones
     if (cls === 'ok' && prov) setPill('st_rwy', 'warn', 'Sin confirmar');   // cabe, pero con condiciones por defecto
     else setPill('st_rwy', cls, cls === 'ok' ? 'Cabes' : cls === 'warn' ? 'Sin margen' : worst === SUM.to ? 'No cabe (salida)' : 'No cabe (llegada)');
   }
@@ -835,17 +842,22 @@ function showSub(panelId) {
   });
   document.querySelectorAll(`[data-seg="${seg.id}"]`).forEach(x => x.classList.toggle('on', x === p));
 }
-function go(tab, open) {
-  if (!$(tab)) return;
+// Los pasos son 4 (ruta, cond, avion, pvo) más la vista de información. Un destino como «viento», «carga» o «perf» es un bloque dentro de un paso:
+// se abre ese paso y se baja hasta el bloque.
+function go(target, open) {
+  const el = $(target), sec = el ? (el.classList.contains('tab') ? el : el.closest('.tab')) : null;
+  if (!sec) return;
+  const tab = sec.id;
   document.querySelectorAll('#tabs button').forEach(b => {
     const on = b.dataset.tab === tab;
     b.classList.toggle('active', on);
     if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
   });
-  document.querySelectorAll('.tab').forEach(s => s.classList.toggle('active', s.id === tab));
+  document.querySelectorAll('.tab').forEach(s => s.classList.toggle('active', s === sec));
   document.body.dataset.view = tab;
-  if (open) showSub(tab + '_' + open);
-  window.scrollTo(0, 0);
+  if (open) showSub(target + '_' + open);
+  if (el.tagName === 'DETAILS') el.open = true;
+  if (el !== sec && el.scrollIntoView) el.scrollIntoView({ block: 'start' }); else window.scrollTo(0, 0);
   if (tab === 'ruta' && window.MAPA) window.MAPA.shown();   // Leaflet necesita medir el mapa ya visible
   document.dispatchEvent(new CustomEvent('c172:tab', { detail: tab }));
 }
@@ -902,7 +914,7 @@ const OUTPUT_IDS = ['wb_res', 'wb_msgs', 'chart', 'atm_out', 'a_atm_out', 'to_ou
 function setPerfWeights() {
   const to = Math.round(TOW / wf), ld = Math.round(Math.max(0, TOW - enrouteFuel * LIM.lbPerGal) / wf);
   $('to_w').value = to; $('ld_w').value = ld;
-  $('to_wtxt').textContent = `Peso de despegue ${dW(TOW)}, con el combustible y la carga del paso 4.`;
+  $('to_wtxt').textContent = `Peso de despegue ${dW(TOW)}, con el combustible y la carga de más arriba.`;
   $('ld_wtxt').textContent = enrouteFuel > 0
     ? `Peso de aterrizaje ${dW(TOW - enrouteFuel * LIM.lbPerGal)}: el de despegue menos el combustible que quemas en la ruta (${dF(enrouteFuel)}).`
     : `Peso de aterrizaje ${dW(TOW)}: sin ruta no se descuenta combustible (del lado conservador).`;

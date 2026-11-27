@@ -1,5 +1,5 @@
 'use strict';
-// Paso 6 «PVO»: bitácora de navegación de la ruta cargada, con el viento de cada tramo, para imprimir (A4 horizontal) o llevar en el celular.
+// Paso 4 «Resumen» (PVO): bitácora de navegación de la ruta cargada, con el viento de cada tramo, para imprimir (A4 horizontal) o llevar en el celular.
 // Todo sale de los mismos cálculos de la app (ruta, viento, combustible, peso y balance, pista). Los textos del AIP se insertan con textContent.
 (function () {
   const $ = id => document.getElementById(id);
@@ -182,7 +182,7 @@
     paintReview();
     const S = build(), none = !S;
     $('pvo_none').hidden = !none; $('pvo_body').hidden = none;
-    if (none) { const T = APP().trip(); $('pvo_none').textContent = T && T.err ? 'No se puede armar la bitácora: ' + T.err : 'Arma una ruta con al menos dos puntos (paso 2) y revisa que los datos estén completos para generar la bitácora.'; lastText = ''; return; }
+    if (none) { const T = APP().trip(); $('pvo_none').textContent = T && T.err ? 'No se puede armar la bitácora: ' + T.err : 'Arma una ruta con al menos dos puntos (paso 1) y revisa que los datos estén completos para generar la bitácora.'; lastText = ''; return; }
     paint(S); lastText = asText(S);
   }
   document.addEventListener('c172:calc', render);

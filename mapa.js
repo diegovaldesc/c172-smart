@@ -544,6 +544,7 @@
       if (window.APP) window.APP.recalc();
     });
     if (window.APP) window.APP.recalc();           // la ruta guardada ya está cargada: calcular aunque la base de aeródromos tarde o falle
+    if (document.body.dataset.view === 'ruta') window.MAPA.shown();   // la ruta es el primer paso: el mapa ya está a la vista al abrir la app
   }
   window.MAPA = {
     shown() { if (typeof L === 'undefined') return; if (!map) createMap(); else { map.invalidateSize(); if (!fitted) { fitRoute(); fitted = true; } } },

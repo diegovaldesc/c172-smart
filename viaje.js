@@ -1,5 +1,5 @@
 'use strict';
-// Paso 3 «Viento y altitud»: hora de salida, viento por tramo (en vivo o a mano) y pronóstico de superficie para las pistas.
+// Paso 2 «Condiciones» (bloque de viento y altitud): hora de salida, viento por tramo (en vivo o a mano) y pronóstico de superficie para las pistas.
 // El viento de cada tramo se guarda por sus extremos (lat/lon): si agregas un punto, los demás tramos conservan su viento.
 (function () {
   const $ = id => document.getElementById(id);
@@ -165,7 +165,7 @@
   };
   async function useMet(which) {
     const note = $(which + '_met_note'), btn = $(which + '_met');
-    if (route().length < 2) { note.textContent = 'Primero arma la ruta con origen y destino (paso 2).'; return; }
+    if (route().length < 2) { note.textContent = 'Primero arma la ruta con origen y destino (paso 1).'; return; }
     btn.disabled = true; note.textContent = 'Consultando el pronóstico…';
     if (!metOk()) await fetchWind();
     btn.disabled = false;
@@ -187,7 +187,7 @@
   $('dep_met').addEventListener('click', () => useMet('dep'));
   $('arr_met').addEventListener('click', () => useMet('arr'));
   document.addEventListener('c172:calc', renderWind);
-  document.addEventListener('c172:tab', e => { if (e.detail === 'viento') { initEtd(); APP().recalc(); } });
+  document.addEventListener('c172:tab', e => { if (e.detail === 'cond') { initEtd(); APP().recalc(); } });
   initEtd();
 
   // Para la bitácora: de dónde sale el viento usado

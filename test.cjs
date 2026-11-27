@@ -533,6 +533,47 @@ for(const id of ['chart','to_fig','ld_fig','to_out','ld_out','fuel_out','fuel_ve
 }
 
 
+// ---------------------------------------------------------------- cuatro pasos: estructura de la navegación y píldoras que llevan a donde se arregla
+{
+  // 1) la página tiene 4 pasos + información; todo destino (data-go) cae dentro de uno de ellos
+  const secs=[...html.matchAll(/<section id="([^"]+)" class="tab[^"]*">/g)].map(m=>({id:m[1],start:m.index,end:html.indexOf('</section>',m.index)}));
+  assert.deepEqual(secs.map(s=>s.id),['ruta','cond','avion','pvo','info'],'cuatro pasos y la vista de información');
+  assert.deepEqual([...html.matchAll(/<button type="button" data-tab="([^"]+)"/g)].map(m=>m[1]),['ruta','cond','avion','pvo'],'la barra de abajo tiene 4 pasos');
+  assert.deepEqual([...html.matchAll(/<i class="stepno">(\d)<\/i>([^<]+)/g)].map(m=>m[1]+' '+m[2]),['1 Tu ruta','2 Condiciones','3 Avión y carga','4 Resumen'],'títulos numerados 1 a 4');
+  const stepOf=id=>{const i=html.indexOf('id="'+id+'"');assert(i>0,'no existe #'+id);const s=secs.find(s=>i>s.start&&i<s.end);assert(s,'#'+id+' no está dentro de un paso');return s.id};
+  const MAP={ruta:'ruta',cond:'cond',viento:'cond',pista:'cond',avion:'avion',plane:'avion',carga:'avion',perf:'avion',pvo:'pvo',info:'info'};
+  for(const [id,step] of Object.entries(MAP))assert.equal(stepOf(id),step,'#'+id+' pertenece al paso '+step);
+  const used=new Set([...html.matchAll(/data-go="([^"]+)"/g)].map(m=>m[1]));
+  for(const f of ['app.js','pvo.js','viaje.js','mapa.js','aerodromos.js']){
+    const code=fs.readFileSync(__dirname+'/'+f,'utf8');
+    for(const m of code.matchAll(/(?:data-go="|dataset\.go = '|goTo\('\w+', '|APP\.go\(')(\w+)/g))used.add(m[1]);
+    if(f==='pvo.js')for(const m of code.matchAll(/\badd\(.*?,\s*'(\w+)'\);?\s*$/gm))used.add(m[1]);          // pvo.js: add(título, estado, texto, destino)
+  }
+  for(const u of used)assert(u in MAP,'destino de navegación desconocido: '+u);
+  assert(used.has('perf')&&used.has('pista')&&used.has('plane')&&used.has('viento')&&used.has('carga')&&used.has('cond')&&used.has('avion'),'los destinos nuevos se usan');
+  for(const old of ['paso 3','paso 4','paso 5','paso 6'])for(const f of ['app.js','pvo.js','viaje.js','mapa.js','index.html']){
+    const code=fs.readFileSync(__dirname+'/'+f,'utf8');assert(!code.includes(old+')')&&!code.includes(old+'.')&&!code.includes(old+' '),f+' todavía habla del '+old+' de la versión de 6 pasos');}
+
+  // 2) las píldoras de estado llevan a donde se arregla lo que dicen
+  const go=id=>nodes.get(id).dataset.go+'|'+(nodes.get(id).dataset.open||'');
+  pick('c172s');set('fl_from','SCTB');set('fl_to','SCSE');run('COND={}');
+  DEP.forEach((id,i)=>set(id,[270,0,15,1013][i]));ARR.forEach((id,i)=>set(id,[270,0,15,1013][i]));
+  ROUTE.pts=[];WIND.fn=()=>null;run('recalc()');
+  assert.equal(go('st_fuel'),'ruta|','sin ruta: lleva a armarla');assert.equal(go('st_rwy'),'ruta|');
+  assert.equal(go('st_wb'),'plane|','peso vacío de ejemplo: lleva a «Tu avión»');
+  assert(/peso vacío de ejemplo/.test(text('plane_sum'))&&nodes.get('plane_sum').className==='warn','el resumen de «Tu avión» avisa del ejemplo');
+  ROUTE.pts=[SCTB,SCRG,SCSE];run('recalc()');
+  assert.equal(go('st_fuel'),'viento|','sin viento: lleva a definirlo');assert.equal(go('st_rwy'),'pista|','condiciones sin confirmar: lleva a confirmarlas');
+  WIND.fn=()=>({dir:0,spd:0});run('recalc()');assert.equal(go('st_fuel'),'carga|');
+  assert(/Resultado provisorio: faltan confirmar las condiciones de la salida/.test(text('to_notes'))&&/data-go="pista"/.test(nodes.get('to_notes').innerHTML)&&/de la llegada/.test(text('ld_notes')),'el aviso de pista provisoria enlaza a las condiciones');
+  confirmCond();assert.equal(go('st_rwy'),'perf|','todo confirmado: lleva al resultado de pista');
+  set('w_empty',+nodes.get('w_empty').value+5/run('wf'));run('recalc()');
+  assert.equal(go('st_wb'),'carga|wb');assert(/vacío \d[\d.]*\d? lb/.test(text('plane_sum'))&&nodes.get('plane_sum').className==='','con el peso de tu matrícula el resumen lo muestra');
+  assert.equal(text('perf_seg_dep'),'SCTB');assert.equal(text('perf_seg_arr'),'SCSE');
+  pick('c172s');ROUTE.pts=[];WIND.fn=()=>null;run('recalc()');
+}
+
+
 // ---------------------------------------------------------------- base de aeródromos: datos y buscador
 const AD=JSON.parse(fs.readFileSync(__dirname+'/data/aerodromos.json','utf8'));
 {
@@ -592,5 +633,5 @@ const AD=JSON.parse(fs.readFileSync(__dirname+'/data/aerodromos.json','utf8'));
   // la ruta usa coordenadas completas
   const rt=A.route(A.get('SCTB'),A.get('SCVI'));assert(rt&&rt.nm>330&&rt.nm<400,'ruta SCTB → SCVI');
   assert.equal(A.route(A.get('SCTB'),{lat:null,lon:-70}),null,'sin coordenadas no hay ruta (la app lo avisa en vez de usar una distancia vieja)');
-  console.log('PASS: integridad de las 5 tablas POH (M, N, P, R, S), valores exactos e interpolación contra el POH, viento/hierba/sobrepeso, fuera de tabla, cambio de modelo y tanques, kg/L, validaciones y salidas finitas, margen seleccionable, crucero/ascenso del POH (celdas exactas, interpolación, fuera de tabla), combustible por tramos con viento (veredicto, alterno, tanque, modo manual), las cuatro respuestas de combustible (consumo, cuánto cargar, cuánto llevo, con cuánto llego) con desglose por fase, bitácora PVO, condiciones sin confirmar (provisorio), peso ejemplo, revisión previa y sello BORRADOR, datos y buscador de aeródromos.');
+  console.log('PASS: integridad de las 5 tablas POH (M, N, P, R, S), valores exactos e interpolación contra el POH, viento/hierba/sobrepeso, fuera de tabla, cambio de modelo y tanques, kg/L, validaciones y salidas finitas, margen seleccionable, crucero/ascenso del POH (celdas exactas, interpolación, fuera de tabla), combustible por tramos con viento (veredicto, alterno, tanque, modo manual), las cuatro respuestas de combustible (consumo, cuánto cargar, cuánto llevo, con cuánto llego) con desglose por fase, navegación en 4 pasos (estructura y píldoras que llevan a donde se arregla), bitácora PVO, condiciones sin confirmar (provisorio), peso ejemplo, revisión previa y sello BORRADOR, datos y buscador de aeródromos.');
 })();
