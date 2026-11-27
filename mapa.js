@@ -433,7 +433,7 @@
     const APP = window.APP, nm = R.legsOf(route).reduce((s, l) => s + l.nm, 0), T = APP && APP.trip();
     const item = (v, l) => { const d = h('div'); d.append(h('b', v), h('span', l)); return d; };
     sum.append(item(nf(nm) + ' NM', route.length === 2 ? '1 tramo' : (route.length - 1) + ' tramos'));
-    if (T && T.pl) sum.append(item(APP.hm(T.flightMin / 60), 'de vuelo'), item(APP.dF(T.total), 'combustible con reserva'));
+    if (T && T.pl) sum.append(item(APP.hm(T.flightMin / 60), 'de vuelo'), item(APP.dF(T.total), 'a cargar, con reserva'));
     if (!ESP.length) { box.append(h('p', 'Cargando espacios aéreos…', 'hint')); return; }
     const a = airAnalysis(); if (!a) return;
     const m = h('div', critText(a) + ' ', critCls(a)), b = h('button', 'Ver el detalle', 'linkbtn'); b.type = 'button';

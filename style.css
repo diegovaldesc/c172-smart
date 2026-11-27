@@ -431,3 +431,20 @@ label.gap{display:block}
 .pv-stamp{border:2px solid #b97a0c;background:#fbf0d4;color:#5e4309;font-weight:800;font-size:12.5px;letter-spacing:.3px;padding:5px 9px;margin:0 0 8px;text-transform:uppercase}
 .pv-stamp.bad{border-color:#b83226;background:#f8dedb;color:#5e1912}
 @media print{.pv-stamp{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+
+/* las cuatro respuestas de combustible: números grandes, un total por ruta */
+.answers{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:10px 0 12px}
+.answers:empty{display:none}
+@media(min-width:720px){.answers{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.ans{position:relative;display:flex;flex-direction:column;gap:2px;background:var(--card);border:1px solid var(--line);border-left:5px solid #c4b9a2;border-radius:12px;padding:10px 11px 11px;box-shadow:var(--shadow);min-width:0}
+.ans .aq{font-size:12.5px;line-height:1.25;color:var(--mut);font-weight:600}
+.ans b{display:block;font-size:clamp(26px,8vw,34px);line-height:1.1;font-weight:800;letter-spacing:-.5px;font-variant-numeric:tabular-nums;color:var(--ink);margin-top:3px}
+.ans b small{font-size:.45em;font-weight:700;color:var(--mut);letter-spacing:0}
+.ans .as{font-size:12.5px;line-height:1.3;color:var(--txt)}
+.ans.ok{border-left-color:var(--ok)}.ans.ok b{color:var(--ok)}
+.ans.bad{border-left-color:var(--bad)}.ans.bad b{color:var(--bad)}
+.ans.prov{border-style:dashed;border-left-style:solid;border-left-color:var(--warn);background:#fbf3df}
+.ans.prov b{color:var(--ink)}
+.ans em{align-self:flex-start;margin-top:5px;font-style:normal;font-size:11px;font-weight:700;color:var(--warn);background:#f4e7c6;border-radius:999px;padding:1px 8px}
+#fuel_sub{margin-top:20px}
+.why .phwrap{margin-top:6px}

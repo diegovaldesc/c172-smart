@@ -581,40 +581,57 @@ function calcTrip() {
   if (wind === 'none') notes.push('Sin viento definido: el cálculo supone aire en calma. Defínelo en el paso 3.');
   else if (wind === 'partial') notes.push('Falta el viento de algún tramo: ahí se supuso aire en calma (paso 3).');
   if (have_w.some(w => w.stale)) notes.push('Parte del viento viene de un pronóstico viejo o de otra hora o altitud: actualízalo en el paso 3.');
-  TRIP = { pts, prm, pl, winds, wind, alt, galAlt, total, have, cap, over, short, landGal, landMin: burn > 0 ? Math.max(0, landGal) / burn * 60 : 0, reach: reachWith(have), reachFull: reachWith(cap), notes, flightMin: pl.min + (alt ? alt.min : 0) };
+  TRIP = { pts, prm, pl, winds, wind, alt, galAlt, total, have, cap, over, short, landGal, trip: prm.taxi + pl.galEnroute, cMin, landMin: burn > 0 ? Math.max(0, landGal) / burn * 60 : 0, reach: reachWith(have), reachFull: reachWith(cap), notes, flightMin: pl.min + (alt ? alt.min : 0) };
   enrouteFuel = pl.galEnroute;
   renderCarga();
 }
 
 function renderCarga() {
   const V = $('fuel_verdict'), T = TRIP;
-  V.replaceChildren(); $('fuel_tbl').replaceChildren(); $('fuel_out').replaceChildren(); $('fuel_note').textContent = '';
-  $('fuel_apply').disabled = true;
+  V.replaceChildren(); $('fuel_tbl').replaceChildren(); $('fuel_phases').replaceChildren(); $('fuel_out').replaceChildren(); $('fuel_ans').replaceChildren(); $('fuel_note').textContent = '';
+  $('fuel_sub').hidden = true; $('fuel_apply').disabled = true;
   const verdict = (cls, title, text) => { const d = mk('div', null, 'verdict ' + cls); d.append(mk('b', title), mk('span', text)); V.append(d); return d; };
   if (!T || T.none) { verdict('warn', 'Todavía no hay ruta', 'Arma la ruta en el paso 2 y aquí verás si el combustible alcanza.'); return; }
   if (T.err) { verdict('bad', 'No se puede calcular', T.err); return; }
   const { prm, pl, alt } = T, resMin = prm.resMin;
   if (T.over) verdict('bad', 'No llegas sin escala', `La ruta pide ${dF(T.total)} y los tanques rinden ${dF(T.cap, 0)}. Con tanques llenos y ${fmt(resMin)} min de reserva alcanzas unas ${fmt(T.reachFull)} NM. Haz escala, baja las RPM o acepta menos reserva.`);
-  else if (T.short) verdict('bad', 'El combustible NO alcanza', `Cargaste ${dF(T.have)} y necesitas ${dF(T.total)}: faltan ${diffF(T.total - T.have)}. Con lo cargado llegas hasta unas ${fmt(T.reach)} NM sin tocar la reserva. Usa «Cargar el combustible necesario».`);
+  else if (T.short) verdict('bad', 'El combustible NO alcanza', `Te faltan ${diffF(T.total - T.have)}. Con lo cargado llegas hasta unas ${fmt(T.reach)} NM sin tocar la reserva. Usa «Cargar el combustible necesario».`);
   else if (T.wind !== 'ok') {
-    // alcanza, pero con el viento sin definir: provisorio (ámbar), no «todo bien»
+    // alcanza, pero con el viento sin definir: provisorio (ámbar), no «todo bien». Las cifras van en las cuatro respuestas de abajo, que quedan marcadas como provisorias.
     const how = { none: 'Se calculó con aire en calma.', partial: 'En los tramos sin dato se supuso aire en calma.', stale: 'El pronóstico de viento es viejo o de otra hora o altitud.' }[T.wind];
     const d = verdict('warn', { none: 'Provisorio: sin viento definido', partial: 'Provisorio: falta el viento de algún tramo', stale: 'Provisorio: el viento está desactualizado' }[T.wind],
-      `${how} Cargaste ${dF(T.have)} y necesitas ${dF(T.total)}; aterrizarías con ${dF(T.landGal)} (${hm(T.landMin / 60)} de vuelo), ${dF(T.have - T.total)} sobre la reserva de ${fmt(resMin)} min${alt ? ' y el alterno' : ''}. No lo des por bueno hasta definir el viento.`);
+      `${how} Con lo cargado alcanza, pero no des por buenas estas cifras hasta definir el viento.`);
     const b = mk('button', 'Definir el viento (paso 3)', 'linkbtn'); b.type = 'button'; b.dataset.go = 'viento'; d.append(b);
   }
-  else verdict('ok', 'El combustible alcanza', `Cargaste ${dF(T.have)} y necesitas ${dF(T.total)}. Aterrizas con ${dF(T.landGal)} (${hm(T.landMin / 60)} de vuelo): ${dF(T.have - T.total)} sobre la reserva de ${fmt(resMin)} min${alt ? ' y el alterno' : ''}.`);
+  else verdict('ok', 'El combustible alcanza', `Cubre el viaje, la reserva de ${fmt(resMin)} min${alt ? ' y el alterno' : ''}.`);
   // con el veredicto provisorio el aviso de viento ya está dicho arriba; si no alcanza, se agrega
   if (T.over || T.short || T.wind === 'ok') T.notes.forEach(n => V.append(mk('div', n, 'msg warn')));
   pl.warns.forEach(w => V.append(mk('div', w, 'msg warn')));
   $('fuel_apply').disabled = T.over;
 
-  const bad = T.over || T.short;
-  $('fuel_out').innerHTML =
-    kpi('Necesitas', dF(T.total), bad ? 'bad' : 'ok') + kpi('Cargado', dF(T.have), bad ? 'bad' : '') +
-    kpi('Aterrizas con', dF(Math.max(0, T.landGal)), T.landGal < pl.galReserve ? 'bad' : '') +
-    kpi('Tiempo de vuelo', hm(T.flightMin / 60)) + kpi('Distancia', fmt(pl.nm) + ' NM') +
-    kpi(`Alcance con ${dF(T.have, 0)} y reserva`, fmt(T.reach) + ' NM', T.short ? 'bad' : '');
+  // Las cuatro preguntas del piloto, con un solo total por ruta (el mismo que ve el PVO y la pestaña Ruta)
+  const prov = T.wind !== 'ok', cls = T.over || T.short ? 'bad' : 'ok', cruiseMin = pl.min - T.cMin;
+  const dur = m => (m < 60 ? mm(m) : hm(m / 60));   // «11 min», no «0 h 11 min»
+  const big = s => { const i = s.lastIndexOf(' '); return `${s.slice(0, i)}<small> ${s.slice(i + 1)}</small>`; };
+  const ans = (q, value, sub, c = '', p = false) => `<div class="ans ${c}${p ? ' prov' : ''}"><span class="aq">${q}</span><b>${big(value)}</b><span class="as">${sub}</span>${p ? '<em>provisorio</em>' : ''}</div>`;
+  $('fuel_ans').innerHTML =
+    ans('¿Cuánto consumo hasta el destino?', dF(T.trip), `${hm(pl.min / 60)} de vuelo · ${fmt(pl.nm)} NM (incluye el rodaje)`, '', prov) +
+    ans('¿Cuánto debo cargar?', dF(T.total), T.over ? `más de lo que rinden tus tanques (${dF(T.cap, 0)})` : `con reserva de ${fmt(resMin)} min${alt ? ' y alterno' : ''}`, cls, prov) +
+    ans('¿Cuánto llevo?', dF(T.have), T.short ? `te faltan ${diffF(T.total - T.have)}` : `te sobran ${diffF(T.have - T.total)}`, T.short ? 'bad' : 'ok', prov) +
+    ans('¿Con cuánto llego?', dF(Math.max(0, T.landGal)), T.landGal < 0 ? 'se acaba antes del destino' : T.short ? `${dur(T.landMin)} más de vuelo: sin cubrir la reserva${alt ? ' y el alterno' : ''}` : `${dur(T.landMin)} más de vuelo · reserva ${fmt(resMin)} min`, T.short ? 'bad' : 'ok', prov);
+  $('fuel_out').innerHTML = kpi('Tiempo de vuelo', hm(T.flightMin / 60)) + kpi('Distancia', fmt(pl.nm) + ' NM') + kpi(`Alcance con ${dF(T.have, 0)} y reserva`, fmt(T.reach) + ' NM', T.short ? 'bad' : '');
+
+  // desglose por fase: rodaje, ascenso, crucero, (alterno) y reserva; la suma es el total de arriba
+  const ph = [['Rodaje + despegue', null, prm.taxi]];
+  if (pl.galClimb > 1e-9 || T.cMin > 0) ph.push(['Ascenso', T.cMin, pl.galClimb]);
+  ph.push(['Crucero hasta el destino', cruiseMin, pl.galCruise]);
+  if (alt) ph.push([`Alterno ${alt.ad.i}`, alt.min, alt.gal]);
+  ph.push([`Reserva ${fmt(resMin)} min`, resMin, pl.galReserve]);
+  const pb = mk('tbody'), phh = mk('thead'), phr = mk('tr'), pf = mk('tfoot'), pfr = mk('tr');
+  ['Fase', 'Tiempo', 'Comb.'].forEach(t => phr.append(mk('th', t))); phh.append(phr);
+  ph.forEach(([n, m, g]) => { const tr = mk('tr'); tr.append(mk('td', n), mk('td', m == null ? '—' : mm(m)), mk('td', dF(g))); pb.append(tr); });
+  pfr.append(mk('td', 'Total a cargar'), mk('td', hm((pl.min + (alt ? alt.min : 0) + resMin) / 60)), mk('td', dF(T.total))); pf.append(pfr);
+  $('fuel_phases').append(phh, pb, pf); $('fuel_sub').hidden = false;
 
   // tabla por tramo: lo que queda en el tanque después de cada fase
   let left = T.have;
@@ -880,7 +897,7 @@ function validateInputs() {
   return ok;
 }
 
-const OUTPUT_IDS = ['wb_res', 'wb_msgs', 'chart', 'atm_out', 'a_atm_out', 'to_out', 'ld_out', 'to_fig', 'ld_fig', 'to_notes', 'ld_notes', 'dep_cond', 'arr_cond', 'fuel_out', 'fuel_verdict', 'fuel_tbl'];
+const OUTPUT_IDS = ['wb_res', 'wb_msgs', 'chart', 'atm_out', 'a_atm_out', 'to_out', 'ld_out', 'to_fig', 'ld_fig', 'to_notes', 'ld_notes', 'dep_cond', 'arr_cond', 'fuel_out', 'fuel_verdict', 'fuel_tbl', 'fuel_ans', 'fuel_phases'];
 // Los pesos de despegue y aterrizaje para Performance salen solos de Carga: despegue = rampa − rodaje; aterrizaje = despegue − combustible de la ruta
 function setPerfWeights() {
   const to = Math.round(TOW / wf), ld = Math.round(Math.max(0, TOW - enrouteFuel * LIM.lbPerGal) / wf);
@@ -898,7 +915,7 @@ function recalc() {
   const ok = validateInputs();
   if (!ok) {
     OUTPUT_IDS.forEach(id => $(id).replaceChildren());
-    $('fuel_apply').disabled = true;
+    $('fuel_apply').disabled = true; $('fuel_sub').hidden = true;
     Object.keys(SUM).forEach(k => { SUM[k] = null; });
     $('fuel_note').textContent = '';
     TOW = enrouteFuel = 0; TRIP = null; WB = null;

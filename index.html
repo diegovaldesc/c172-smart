@@ -173,6 +173,7 @@
 <section id="carga" class="tab">
   <div class="pagehead"><h1><i class="stepno">4</i>Carga y combustible</h1><p>¿Alcanza el combustible? ¿Estás dentro de peso y centro de gravedad?</p></div>
   <div id="fuel_verdict"></div>
+  <div id="fuel_ans" class="answers" aria-live="polite"></div>
   <div class="card">
     <h2>Combustible</h2>
     <div class="form">
@@ -197,8 +198,10 @@
       <p class="pk-info" id="alt_info"></p>
     </div>
     <button id="fuel_apply" class="primary" type="button">Cargar el combustible necesario</button>
+    <h3 class="sub" id="fuel_sub" hidden>Desglose del combustible</h3>
+    <div class="phwrap"><table id="fuel_phases" class="grid phases"></table></div>
     <div id="fuel_out" class="kpis"></div>
-    <div class="phwrap"><table id="fuel_tbl" class="grid phases"></table></div>
+    <details class="why"><summary>Por tramo, con el viento de cada uno</summary><div class="phwrap"><table id="fuel_tbl" class="grid phases"></table></div></details>
     <details class="why"><summary>Cómo se calculó</summary><p id="fuel_note"></p></details>
   </div>
 

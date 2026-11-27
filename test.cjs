@@ -154,12 +154,13 @@ assert.equal(text('chip'),'SCTB → SCSE (+1)');
   // con el viento definido (aquí, calma escrita a propósito) el mismo número pasa a ser un resultado confiable
   WIND.fn=()=>({dir:0,spd:0});run('recalc()');
   assert.equal(run('TRIP.wind'),'ok');near(run('TRIP.total'),T.total,1e-9);
-  assert(/El combustible alcanza/.test(text('fuel_verdict'))&&/Aterrizas con/.test(text('fuel_verdict')));
+  assert(/El combustible alcanza/.test(text('fuel_verdict'))&&/Cubre el viaje, la reserva de 30 min/.test(text('fuel_verdict')));assert(/¿Con cuánto llego\?/.test(text('fuel_ans')));
   assert.equal(nodes.get('fuel_verdict').kids[0].className,'verdict ok');
   assert.equal(pill('st_fuel').cls,'ok');assert(/Sobran/.test(pill('st_fuel').txt));
   const tb=text('fuel_tbl');
+  assert(/Rodaje \+ despegue/.test(text('fuel_phases'))&&/Ascenso/.test(text('fuel_phases'))&&/Crucero hasta el destino/.test(text('fuel_phases'))&&/Reserva 30 min/.test(text('fuel_phases'))&&/Total a cargar/.test(text('fuel_phases')),'desglose por fase');
   assert(/Rodaje \+ despegue/.test(tb)&&/1\. SCTB → SCRG/.test(tb)&&/2\. SCRG → SCSE/.test(tb)&&/Reserva/.test(tb)&&/Total/.test(tb)&&/con ascenso/.test(tb),'tabla por tramo');
-  assert(!/NaN|Infinity|undefined/.test(nodes.get('fuel_tbl').innerHTML+nodes.get('fuel_out').innerHTML));
+  assert(!/NaN|Infinity|undefined/.test(nodes.get('fuel_tbl').innerHTML+nodes.get('fuel_out').innerHTML+nodes.get('fuel_ans').innerHTML+nodes.get('fuel_phases').innerHTML));
   // veredicto: con poco combustible dice que NO alcanza y cuánto falta
   set('f_gal',20);run('recalc()');
   const L=run('TRIP');
@@ -175,6 +176,43 @@ assert.equal(text('chip'),'SCTB → SCSE (+1)');
   assert.equal(run('SUM.wb.ok'),true);
 }
 set('f_gal',40);run('recalc()');
+
+// ---------------------------------------------------------------- las cuatro respuestas de combustible (un solo total por ruta)
+{
+  const n1=x=>g.APP.dF(x).split(' ')[0];
+  const tiles=()=>nodes.get('fuel_ans').innerHTML.split('<div class="ans ').slice(1);
+  const unit=n=>'<b>'+n+'<small> gal</small></b>';
+  set('f_gal',40);WIND.fn=()=>({dir:0,spd:0});run('recalc()');
+  let T=run('TRIP'),P=tiles();
+  assert.equal(P.length,4,'cuatro respuestas');
+  ['¿Cuánto consumo hasta el destino?','¿Cuánto debo cargar?','¿Cuánto llevo?','¿Con cuánto llego?'].forEach((q,i)=>assert(P[i].includes(q),'pregunta '+(i+1)+': '+q));
+  near(T.trip,T.total-T.pl.galReserve-T.galAlt,1e-9,'consumo hasta el destino = total − reserva − alterno');
+  assert(P[0].includes(unit(n1(T.trip)))&&/de vuelo · 30\d NM \(incluye el rodaje\)/.test(P[0]),'1) consumo, tiempo y distancia');
+  assert(P[1].includes(unit(n1(T.total)))&&/con reserva de 30 min/.test(P[1]),'2) cuánto cargar');
+  assert(P[2].includes(unit('40,0'))&&/te sobran/.test(P[2]),'3) cuánto llevo y cuánto sobra');
+  assert(P[3].includes(unit(n1(T.landGal)))&&/más de vuelo · reserva 30 min/.test(P[3]),'4) con cuánto llego');
+  assert(P.every(p=>!/prov/.test(p.split('"')[0])),'con viento definido ninguna respuesta es provisoria');assert(!/provisorio/.test(nodes.get('fuel_ans').innerHTML));
+  // el desglose por fase suma el mismo total que se ve arriba, y en el mismo número en toda la app
+  const ph=nodes.get('fuel_phases').innerHTML;
+  assert(ph.includes('Total a cargar')&&ph.includes(g.APP.dF(T.total)),'el desglose termina en el mismo total');
+  near(T.prm.taxi+T.pl.galClimb+T.pl.galCruise+T.pl.galReserve+T.galAlt,T.total,1e-9,'rodaje + ascenso + crucero + reserva (+ alterno) = total');
+  assert.equal(nodes.get('fuel_sub').hidden,false);
+  // sin viento definido o viejo: las cuatro quedan marcadas como provisorias
+  WIND.fn=()=>null;run('recalc()');P=tiles();assert(P.every(p=>/prov/.test(p.split('"')[0])),'sin viento: todas provisorias');assert.equal((nodes.get('fuel_ans').innerHTML.match(/<em>provisorio<\/em>/g)||[]).length,4);
+  WIND.fn=()=>({dir:0,spd:0});
+  // con poco combustible: lo que llevo y con cuánto llego salen en rojo y dicen cuánto falta
+  set('f_gal',30);run('recalc()');T=run('TRIP');P=tiles();
+  assert(T.short&&T.landGal>0&&T.landGal<T.pl.galReserve,'30 gal: llega, pero por debajo de la reserva');
+  assert(P[1].startsWith('bad')&&P[2].startsWith('bad')&&P[3].startsWith('bad'),'no alcanza: respuestas en rojo');
+  assert(/te faltan/.test(P[2])&&P[2].includes(unit('30,0')),'3) cuánto falta');assert(/sin cubrir la reserva/.test(P[3]),'4) llega por debajo de la reserva');
+  // sin combustible para llegar: llega con 0 y lo dice
+  set('f_gal',5);run('recalc()');P=tiles();assert(run('TRIP.landGal')<0&&P[3].includes(unit('0,0'))&&/se acaba antes del destino/.test(P[3]));
+  set('f_gal',40);run('recalc()');
+  // sin ruta o con error de cálculo no hay respuestas inventadas
+  ROUTE.pts=[];run('recalc()');assert.equal(nodes.get('fuel_ans').innerHTML,'');assert.equal(nodes.get('fuel_phases').innerHTML,'');assert.equal(nodes.get('fuel_sub').hidden,true);
+  ROUTE.pts=[SCTB,SCRG,SCSE];WIND.fn=()=>({dir:285,spd:200});run('recalc()');assert(run('TRIP.err'));assert.equal(nodes.get('fuel_ans').innerHTML,'');
+  WIND.fn=()=>null;run('recalc()');
+}
 
 // ---------------------------------------------------------------- el viento de cada tramo cambia el combustible
 {
@@ -198,11 +236,11 @@ set('f_gal',40);run('recalc()');
   const base=run('TRIP').total;
   g.AD={get:id=>id==='SCXX'?{i:'SCXX',n:'Alterno de prueba',lat:-30.6,lon:-71.2}:id==='SCSE'?{...SCSE,n:'La Florida'}:null};
   set('alt_icao','SCXX');run('recalc()');
-  let T=run('TRIP');assert(T.alt&&T.galAlt>2&&T.galAlt<5,'alterno a ~40 NM del destino: '+T.galAlt);near(T.total,base+T.galAlt,1e-9);assert(/Alterno SCXX/.test(text('fuel_tbl')));
+  let T=run('TRIP');assert(T.alt&&T.galAlt>2&&T.galAlt<5,'alterno a ~40 NM del destino: '+T.galAlt);near(T.total,base+T.galAlt,1e-9);assert(/Alterno SCXX/.test(text('fuel_tbl'))&&/Alterno SCXX/.test(text('fuel_phases'))&&/y alterno/.test(text('fuel_ans')),'el alterno entra en el desglose y en «cuánto debo cargar»');
   set('alt_icao','SCSE');run('recalc()');assert.equal(run('TRIP.alt'),null,'el alterno no puede ser el destino');
   set('alt_icao','');
   ROUTE.pts=[SCTB,SCCI];run('recalc()');                                      // ~1.100 NM: más que el tanque
-  T=run('TRIP');assert(T.over&&/No llegas sin escala/.test(text('fuel_verdict')));assert.equal(nodes.get('fuel_apply').disabled,true);assert.equal(pill('st_fuel').txt,'No llegas');
+  T=run('TRIP');assert(T.over&&/No llegas sin escala/.test(text('fuel_verdict'))&&/más de lo que rinden tus tanques/.test(text('fuel_ans')));assert.equal(nodes.get('fuel_apply').disabled,true);assert.equal(pill('st_fuel').txt,'No llegas');
   ROUTE.pts=[SCTB];run('recalc()');assert(/Todavía no hay ruta/.test(text('fuel_verdict')),'un solo punto no es una ruta');
   ROUTE.pts=[SCTB,SCRG,SCSE];run('recalc()');
 }
@@ -249,7 +287,7 @@ set('f_gal',40);run('recalc()');
   set('oat',150);run('recalc()');assert.equal(run('validateInputs()'),false,'OAT 150 °C');set('oat',15);
   // al suspender se limpian resumen y salidas (también el veredicto: mejor nada que un número falso); al corregir vuelven
   set('qnh','');run('recalc()');
-  assert.equal(run('SUM.wb'),null);assert.equal(nodes.get('to_out').innerHTML,'');assert.equal(nodes.get('fuel_verdict').innerHTML,'');assert.equal(nodes.get('validation').hidden,false);assert.equal(pill('st_fuel').cls,'warn');
+  assert.equal(run('SUM.wb'),null);assert.equal(nodes.get('to_out').innerHTML,'');assert.equal(nodes.get('fuel_verdict').innerHTML,'');assert.equal(nodes.get('fuel_ans').innerHTML,'');assert.equal(nodes.get('fuel_phases').innerHTML,'');assert.equal(nodes.get('validation').hidden,false);assert.equal(pill('st_fuel').cls,'warn');
   set('qnh',1013);run('recalc()');
   assert.notEqual(run('SUM.wb'),null);assert.notEqual(nodes.get('to_out').innerHTML,'');assert.notEqual(nodes.get('fuel_verdict').innerHTML,'');assert.equal(nodes.get('validation').hidden,true);
   // avisos de peso y balance
@@ -264,7 +302,7 @@ set('f_gal',40);run('recalc()');
   assert.equal(nodes.get('w_empty').value,'1642');assert.equal(nodes.get('f_gal').value,'40');assert.equal(run('validateInputs()'),true);
   set('u_w','kg');set('u_f','L');run('onUnitChange()');assert.equal(run('validateInputs()'),true);set('f_gal',20);run('recalc()');
   nodes.get('fuel_apply').events.click();
-  assert(run("num('f_gal') * ff + 1e-9 >= TRIP.total"),'litros: alcanza');assert(run("num('f_gal') * ff <= LIM.fuelMax"));assert(/L/.test(text('fuel_verdict')));
+  assert(run("num('f_gal') * ff + 1e-9 >= TRIP.total"),'litros: alcanza');assert(run("num('f_gal') * ff <= LIM.fuelMax"));assert(/<small> L<\/small>/.test(nodes.get('fuel_ans').innerHTML)&&!/<small> gal<\/small>/.test(nodes.get('fuel_ans').innerHTML),'las respuestas salen en litros');
   reset();set('f_gal',40);run('recalc()');
 }
 
@@ -554,5 +592,5 @@ const AD=JSON.parse(fs.readFileSync(__dirname+'/data/aerodromos.json','utf8'));
   // la ruta usa coordenadas completas
   const rt=A.route(A.get('SCTB'),A.get('SCVI'));assert(rt&&rt.nm>330&&rt.nm<400,'ruta SCTB → SCVI');
   assert.equal(A.route(A.get('SCTB'),{lat:null,lon:-70}),null,'sin coordenadas no hay ruta (la app lo avisa en vez de usar una distancia vieja)');
-  console.log('PASS: integridad de las 5 tablas POH (M, N, P, R, S), valores exactos e interpolación contra el POH, viento/hierba/sobrepeso, fuera de tabla, cambio de modelo y tanques, kg/L, validaciones y salidas finitas, margen seleccionable, crucero/ascenso del POH (celdas exactas, interpolación, fuera de tabla), combustible por tramos con viento (veredicto, alterno, tanque, modo manual), bitácora PVO, condiciones sin confirmar (provisorio), peso ejemplo, revisión previa y sello BORRADOR, datos y buscador de aeródromos.');
+  console.log('PASS: integridad de las 5 tablas POH (M, N, P, R, S), valores exactos e interpolación contra el POH, viento/hierba/sobrepeso, fuera de tabla, cambio de modelo y tanques, kg/L, validaciones y salidas finitas, margen seleccionable, crucero/ascenso del POH (celdas exactas, interpolación, fuera de tabla), combustible por tramos con viento (veredicto, alterno, tanque, modo manual), las cuatro respuestas de combustible (consumo, cuánto cargar, cuánto llevo, con cuánto llego) con desglose por fase, bitácora PVO, condiciones sin confirmar (provisorio), peso ejemplo, revisión previa y sello BORRADOR, datos y buscador de aeródromos.');
 })();
