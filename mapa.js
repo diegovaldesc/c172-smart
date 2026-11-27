@@ -326,7 +326,7 @@
     box.hidden = !list.length; if (!list.length) return;
     const outB = route.length > 1 ? R.inv(route[0], route[1]).brg : null, inB = route.length > 1 ? R.inv(route[route.length - 1], route[route.length - 2]).brg : null;
     box.append(h('h3', 'Rutas visuales publicadas en el AIP (ENR 7)', 'subhead'));
-    box.append(h('p', 'Texto del AIP tal como se publica: rutas por referencias de terreno, altitudes y comunicaciones. Si tu ruta sale o llega por un rumbo que coincide con alguna, la abro. El AIP vigente y el NOTAM mandan.', 'hint'));
+    box.append(h('p', 'Texto del AIP tal como se publica: rutas por referencias de terreno, altitudes y comunicaciones. Se abren solo las que coinciden con el rumbo de tu ruta. Prevalecen el AIP vigente y los NOTAM.', 'hint'));
     const group = (title, items, tp) => {
       if (!items.length) return;
       box.append(h('h4', title, 'rt-rvh'));
@@ -444,7 +444,7 @@
   // Detalle por tramo (Información adicional > Espacios aéreos)
   function renderAir() {
     const box = $('rt_air'); box.replaceChildren();
-    if (route.length < 2) { box.append(h('p', 'Arma una ruta con al menos dos puntos para ver los espacios aéreos que cruza.', 'hint')); return; }
+    if (route.length < 2) { box.append(h('p', 'Crea una ruta con al menos dos puntos para ver los espacios aéreos que cruza.', 'hint')); return; }
     if (!ESP.length) { box.append(h('p', 'Cargando espacios aéreos…', 'hint')); return; }
     const a = airAnalysis(); if (!a) return;
     const { cx, byId, rel } = a;

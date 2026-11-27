@@ -100,7 +100,7 @@ window.MODELS = {
         [2300,[49,96,6],[46,95,5.9],[43,94,5.7]],
         [2200,[44,91,5.7],[41,89,5.5],[38,88,5.3]]]}
     ]},
-    climb: {w:2300,allow:1.1,cond:"Flaps arriba, gas a fondo, temperatura estándar, cero viento",cols:["pa","tempC","kias","fpm","min","gal","nm"],rows:[
+    climb: {w:2300,allow:1.1,cond:"Flaps arriba, acelerador a fondo, temperatura estándar, cero viento",cols:["pa","tempC","kias","fpm","min","gal","nm"],rows:[
       [0,15,78,645,0,0,0],
       [1000,13,77,605,2,0.3,2],
       [2000,11,76,560,3,0.7,4],
@@ -210,7 +210,7 @@ window.MODELS = {
         [2300,[50,102,5.8],[48,101,5.6],[46,100,5.5]],
         [2200,[46,96,5.5],[44,95,5.4],[43,94,5.3]]]}
     ]},
-    climb: {w:2300,allow:1.1,cond:"Flaps arriba, gas a fondo, temperatura estándar, cero viento",cols:["pa","tempC","kias","fpm","min","gal","nm"],rows:[
+    climb: {w:2300,allow:1.1,cond:"Flaps arriba, acelerador a fondo, temperatura estándar, cero viento",cols:["pa","tempC","kias","fpm","min","gal","nm"],rows:[
       [0,15,73,770,0,0,0],
       [1000,13,73,725,1,0.3,2],
       [2000,11,72,675,3,0.6,3],
@@ -318,7 +318,7 @@ window.MODELS = {
         [2400,[59,105,6.6],[56,103,6.3],[54,100,6.1]],
         [2300,[53,98,6.1],[51,96,5.9],[50,94,5.8]]]}
     ]},
-    climb: {w:2400,allow:1.1,cond:"Flaps arriba, gas a fondo, temperatura estándar, cero viento",cols:["pa","tempC","kias","fpm","min","gal","nm"],rows:[
+    climb: {w:2400,allow:1.1,cond:"Flaps arriba, acelerador a fondo, temperatura estándar, cero viento",cols:["pa","tempC","kias","fpm","min","gal","nm"],rows:[
       [0,15,76,700,0,0,0],
       [1000,13,76,655,1,0.3,2],
       [2000,11,75,610,3,0.6,4],
@@ -406,7 +406,7 @@ window.MODELS = {
         [2200,[62,108,7.1],[59,105,6.8],[57,103,6.6]],
         [2100,[56,100,6.4],[54,97,6.2],[53,94,6.1]]]}
     ]},
-    climb: {w:2450,allow:1.1,cond:"Flaps arriba, gas a fondo, temperatura estándar, cero viento; mezcla pobre sobre 3000 ft",cols:["pa","tempC","kias","fpm","min","gal","nm"],rows:[
+    climb: {w:2450,allow:1.1,cond:"Flaps arriba, acelerador a fondo, temperatura estándar, cero viento; mezcla pobre sobre 3000 ft",cols:["pa","tempC","kias","fpm","min","gal","nm"],rows:[
       [0,15,79,720,0,0,0],
       [1000,13,78,670,1,0.4,2],
       [2000,11,77,625,3,0.7,4],
@@ -519,7 +519,7 @@ window.MODELS = {
         [2400,[52,105,7.5],[49,102,7.1],[46,100,6.8]],
         [2300,[47,98,6.9],[44,95,6.6],[41,92,6.3]]]}
     ]},
-    climb: {w:2550,allow:1.4,cond:"Flaps arriba, gas a fondo, temperatura estándar, cero viento; mezcla pobre sobre 3000 ft",cols:["pa","tempC","kias","fpm","min","gal","nm"],rows:[
+    climb: {w:2550,allow:1.4,cond:"Flaps arriba, acelerador a fondo, temperatura estándar, cero viento; mezcla pobre sobre 3000 ft",cols:["pa","tempC","kias","fpm","min","gal","nm"],rows:[
       [0,15,74,730,0,0,0],
       [1000,13,73,695,1,0.4,2],
       [2000,11,73,655,3,0.8,4],

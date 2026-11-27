@@ -3,7 +3,7 @@
   "short_name": "C172 Smart",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#16222e",
-  "theme_color": "#16222e",
+  "background_color": "#12263a",
+  "theme_color": "#12263a",
   "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
 }

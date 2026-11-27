@@ -63,7 +63,7 @@
       save();
       if (errs) status(`La hora de salida (${dayhm(etd)}) queda fuera del pronóstico disponible (desde ayer hasta 3 días). Elige otra hora o escribe el viento a mano.`, 'bad');
       else status(`Viento en vivo obtenido a las ${hhmm(now)}: pronóstico de modelo para ${dayhm(etd)}, a ${nf(prm.alt)} ft.`, 'ok');
-      if (res.legs.some(l => l.clamp === 'low')) $('vi_msg').append(mk('div', 'En parte de la ruta, a esa altitud el relieve del modelo queda sobre el nivel de vuelo: ahí se usó el viento más bajo disponible. Revísalo con criterio.', 'msg warn'));
+      if (res.legs.some(l => l.clamp === 'low')) $('vi_msg').append(mk('div', 'En parte de la ruta, a esa altitud el relieve del modelo queda sobre el nivel de vuelo: ahí se usó el viento más bajo disponible. Verifícalo con otras fuentes.', 'msg warn'));
       A.recalc();
       return !errs;
     } catch (e) {
@@ -79,7 +79,7 @@
     const w = windOf(p, q);
     if (!w) return 'sin dato: se supone calma';
     if (w.src === 'mano') return 'a mano';
-    return w.stale ? 'en vivo, VIEJO: actualízalo' : `en vivo, ${hhmm(w.at)}`;
+    return w.stale ? 'en vivo, DESACTUALIZADO: actualízalo' : `en vivo, ${hhmm(w.at)}`;
   }
   function renderWind() {
     const pts = route(), tbl = $('vi_tbl'), A = APP();
@@ -120,7 +120,7 @@
     [...tbl.querySelectorAll('tbody tr')].forEach((tr, k) => {
       const p = pts[k], q = pts[k + 1], src = tr.querySelector('.vi-src');
       src.textContent = srcText(p, q);
-      src.classList.toggle('warn', /VIEJO|sin dato/.test(src.textContent));
+      src.classList.toggle('warn', /DESACTUALIZADO|sin dato/.test(src.textContent));
       const w = windOf(p, q), act = document.activeElement;
       [['.d', w ? Math.round(w.dir) % 360 : ''], ['.s', w ? Math.round(w.spd) : '']].forEach(([sel, v]) => { const i = tr.querySelector(sel); if (i !== act && i.value !== String(v)) i.value = v; });
     });
@@ -140,7 +140,7 @@
       else status('Viento escrito a mano.', '');
     } else {
       const last = Math.max(...live.map(w => w.at)), stale = live.some(w => w.stale);
-      status(stale ? `El viento en vivo de las ${hhmm(last)} está viejo o es de otra hora o altitud: actualízalo.` : `Viento en vivo de las ${hhmm(last)} (pronóstico de modelo para ${dayhm(live[0].etd)}).`, stale ? 'warn' : 'ok');
+      status(stale ? `El viento en vivo de las ${hhmm(last)} está desactualizado o es de otra hora o altitud: actualízalo.` : `Viento en vivo de las ${hhmm(last)} (pronóstico de modelo para ${dayhm(live[0].etd)}).`, stale ? 'warn' : 'ok');
     }
     void s;
     const box = $('vi_msg');
@@ -165,7 +165,7 @@
   };
   async function useMet(which) {
     const note = $(which + '_met_note'), btn = $(which + '_met');
-    if (route().length < 2) { note.textContent = 'Primero arma la ruta con origen y destino (paso 1).'; return; }
+    if (route().length < 2) { note.textContent = 'Primero crea la ruta con origen y destino (paso 1).'; return; }
     btn.disabled = true; note.textContent = 'Consultando el pronóstico…';
     if (!metOk()) await fetchWind();
     btn.disabled = false;
@@ -195,7 +195,7 @@
     const pts = route(), ws = pts.slice(1).map((q, i) => windOf(pts[i], q));
     const live = ws.filter(w => w && w.src === 'vivo'), man = ws.filter(w => w && w.src === 'mano').length, none = ws.filter(w => !w).length;
     const out = [];
-    if (live.length) out.push(`${live.length} tramo${live.length > 1 ? 's' : ''} con pronóstico de modelo de Open-Meteo.com (obtenido ${hhmm(Math.max(...live.map(w => w.at)))}, para ${dayhm(live[0].etd)})${live.some(w => w.stale) ? ', VIEJO' : ''}`);
+    if (live.length) out.push(`${live.length} tramo${live.length > 1 ? 's' : ''} con pronóstico de modelo de Open-Meteo.com (obtenido ${hhmm(Math.max(...live.map(w => w.at)))}, para ${dayhm(live[0].etd)})${live.some(w => w.stale) ? ', DESACTUALIZADO' : ''}`);
     const tr = n => `${n} tramo${n > 1 ? 's' : ''}`;
     if (man) out.push(`${tr(man)} con viento a mano`);
     if (none) out.push(`${tr(none)} sin dato (se supuso calma)`);

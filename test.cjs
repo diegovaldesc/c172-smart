@@ -225,7 +225,7 @@ set('f_gal',40);run('recalc()');
   WIND.fn=(p,q)=>(p===SCTB?{dir:195,spd:10}:null);run('recalc()');
   assert.equal(run('TRIP.wind'),'partial');assert(/Provisorio: falta el viento de algún tramo/.test(text('fuel_verdict')),'viento en un solo tramo: provisorio');assert.equal(pill('st_fuel').txt,'Falta viento');
   WIND.fn=()=>({dir:270,spd:10,stale:true});run('recalc()');
-  assert.equal(run('TRIP.wind'),'stale');assert(/Provisorio: el viento está desactualizado/.test(text('fuel_verdict')),'viento desactualizado: provisorio');assert.equal(pill('st_fuel').txt,'Viento viejo');
+  assert.equal(run('TRIP.wind'),'stale');assert(/Provisorio: el viento está desactualizado/.test(text('fuel_verdict')),'viento desactualizado: provisorio');assert.equal(pill('st_fuel').txt,'Viento caducado');
   WIND.fn=()=>({dir:285,spd:200});run('recalc()');                           // viento de costado mayor que la TAS: no hay avance
   assert(run('TRIP.err')&&/no hay avance/.test(text('fuel_verdict'))&&/No se puede calcular/.test(text('fuel_verdict')));assert.equal(nodes.get('fuel_apply').disabled,true);assert.equal(pill('st_fuel').cls,'bad');
   WIND.fn=()=>null;run('recalc()');near(run('TRIP.total'),base,1e-9);

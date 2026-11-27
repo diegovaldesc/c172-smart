@@ -16,7 +16,7 @@
     const A = APP(), T = A.trip(), V = window.VIAJE, M = A.model(), SUM = A.sum();
     const pts = (window.MAPA && window.MAPA.route) ? window.MAPA.route() : [];
     const items = [], add = (k, st, txt, go) => items.push({ k, st, txt, go });
-    if (pts.length < 2) add('Ruta', 'bad', 'Falta armar la ruta con origen y destino.', 'ruta');
+    if (pts.length < 2) add('Ruta', 'bad', 'Falta crear la ruta con origen y destino.', 'ruta');
     else add('Ruta', 'ok', pts.map((p, i) => A.ptLabel(p, i)).join(' → ') + (T && T.pl ? ` · ${nf(T.pl.nm)} NM` : ''), 'ruta');
     const ex = A.emptyIsExample();
     add('Avión', ex ? 'warn' : 'ok', ex ? `${M.nombre}: el peso vacío y el brazo son el ejemplo del POH, no los de tu matrícula.` : `${M.nombre}, con el peso vacío que ingresaste.`, 'plane');
@@ -182,7 +182,7 @@
     paintReview();
     const S = build(), none = !S;
     $('pvo_none').hidden = !none; $('pvo_body').hidden = none;
-    if (none) { const T = APP().trip(); $('pvo_none').textContent = T && T.err ? 'No se puede armar la bitácora: ' + T.err : 'Arma una ruta con al menos dos puntos (paso 1) y revisa que los datos estén completos para generar la bitácora.'; lastText = ''; return; }
+    if (none) { const T = APP().trip(); $('pvo_none').textContent = T && T.err ? 'No se puede generar la bitácora: ' + T.err : 'Crea una ruta con al menos dos puntos (paso 1) y revisa que los datos estén completos para generar la bitácora.'; lastText = ''; return; }
     paint(S); lastText = asText(S);
   }
   document.addEventListener('c172:calc', render);
