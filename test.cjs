@@ -58,6 +58,10 @@ const text=id=>nodes.get(id).textContent;
 const SCTB={lat:-33.45694,lon:-70.54722,i:'SCTB',n:'Eulogio Sánchez'},SCRG={lat:-34.17322,lon:-70.77569,i:'SCRG'},SCSE={lat:-29.91639,lon:-71.19944,i:'SCSE'},SCCI={lat:-53.0026,lon:-70.8546,i:'SCCI'};
 const pill=id=>({cls:nodes.get(id).querySelector('.dot').className.replace('dot ',''),txt:nodes.get(id).querySelector('small').textContent});
 
+// las condiciones de superficie (viento, temperatura, QNH) solo cuentan como dato si vienen del pronóstico o las escribió el piloto: esto simula que las escribió
+const DEP=['wdir','wspd','oat','qnh'],ARR=['a_wdir','a_wspd','a_oat','a_qnh'];
+const confirmCond=()=>{DEP.forEach(id=>run("touchCond('dep','"+id+"')"));ARR.forEach(id=>run("touchCond('arr','"+id+"')"));run('recalc()')};
+
 // el peso de despegue sale de Carga: para probar la performance a un peso dado se ajusta el peso vacío (en la unidad que esté activa)
 const towTo=w=>{run('recalc()');set('w_empty',+nodes.get('w_empty').value+(w-run('TOW'))/run('wf'));run('recalc()');near(run('TOW'),w,1e-6,'peso de despegue ajustado')};
 
@@ -140,8 +144,18 @@ assert.equal(text('chip'),'SCTB → SCSE (+1)');
   near(T.total,1.4+2.2+(T.pl.nm-13)/114*9.0+4.5,1e-6,'total = rodaje + ascenso + crucero + reserva');
   near(T.pl.legs[1].gs,114,1e-9,'sin viento: velocidad suelo = TAS');
   near(T.pl.legs[0].min,10+(44.4-13)/114*60,1.5,'primer tramo: ascenso + crucero');
-  assert(/Sin datos de viento/.test(text('fuel_verdict')),'sin viento cargado, el aviso lo dice');
+  // sin viento definido el resultado es PROVISORIO (ámbar): no se da por bueno un cálculo con calma supuesta en silencio
+  assert.equal(T.wind,'none');
+  assert(/Provisorio: sin viento definido/.test(text('fuel_verdict'))&&/aire en calma/.test(text('fuel_verdict')),'sin viento: el veredicto es provisorio y lo dice');
+  assert(!/El combustible alcanza/.test(text('fuel_verdict')),'sin viento no se dice «alcanza» a secas');
+  assert.equal(nodes.get('fuel_verdict').kids[0].className,'verdict warn');
+  assert.equal(pill('st_fuel').cls,'warn');assert.equal(pill('st_fuel').txt,'Sin viento');
+  assert.equal(nodes.get('fuel_apply').disabled,false,'se puede cargar el combustible igual');
+  // con el viento definido (aquí, calma escrita a propósito) el mismo número pasa a ser un resultado confiable
+  WIND.fn=()=>({dir:0,spd:0});run('recalc()');
+  assert.equal(run('TRIP.wind'),'ok');near(run('TRIP.total'),T.total,1e-9);
   assert(/El combustible alcanza/.test(text('fuel_verdict'))&&/Aterrizas con/.test(text('fuel_verdict')));
+  assert.equal(nodes.get('fuel_verdict').kids[0].className,'verdict ok');
   assert.equal(pill('st_fuel').cls,'ok');assert(/Sobran/.test(pill('st_fuel').txt));
   const tb=text('fuel_tbl');
   assert(/Rodaje \+ despegue/.test(tb)&&/1\. SCTB → SCRG/.test(tb)&&/2\. SCRG → SCSE/.test(tb)&&/Reserva/.test(tb)&&/Total/.test(tb)&&/con ascenso/.test(tb),'tabla por tramo');
@@ -167,13 +181,13 @@ set('f_gal',40);run('recalc()');
   const base=run('TRIP').total;
   WIND.fn=(p,q)=>({dir:q===SCRG?195:355,spd:30});run('recalc()');            // de frente en los dos tramos (rumbos 195° y 355°)
   let T=run('TRIP');near(T.pl.legs[1].gs,84,0.5,'viento de frente de 30 kt: 114 − 30');assert(T.total>base+3,'con viento de frente se gasta más');
-  assert(!/Sin datos de viento/.test(text('fuel_verdict')));assert(/viento 355° 30 kt/.test(text('fuel_tbl')),'la tabla muestra el viento de cada tramo');
+  assert(!/Provisorio/.test(text('fuel_verdict')));assert(/viento 355° 30 kt/.test(text('fuel_tbl')),'la tabla muestra el viento de cada tramo');
   WIND.fn=(p,q)=>({dir:q===SCRG?15:175,spd:30});run('recalc()');             // de cola
   T=run('TRIP');near(T.pl.legs[1].gs,144,0.5,'viento de cola de 30 kt');assert(T.total<base-3,'con viento de cola se gasta menos');
   WIND.fn=(p,q)=>(p===SCTB?{dir:195,spd:10}:null);run('recalc()');
-  assert(/Falta el viento de algún tramo/.test(text('fuel_verdict')),'viento en un solo tramo: avisa');
+  assert.equal(run('TRIP.wind'),'partial');assert(/Provisorio: falta el viento de algún tramo/.test(text('fuel_verdict')),'viento en un solo tramo: provisorio');assert.equal(pill('st_fuel').txt,'Falta viento');
   WIND.fn=()=>({dir:270,spd:10,stale:true});run('recalc()');
-  assert(/pronóstico viejo/.test(text('fuel_verdict')),'viento desactualizado: avisa');
+  assert.equal(run('TRIP.wind'),'stale');assert(/Provisorio: el viento está desactualizado/.test(text('fuel_verdict')),'viento desactualizado: provisorio');assert.equal(pill('st_fuel').txt,'Viento viejo');
   WIND.fn=()=>({dir:285,spd:200});run('recalc()');                           // viento de costado mayor que la TAS: no hay avance
   assert(run('TRIP.err')&&/no hay avance/.test(text('fuel_verdict'))&&/No se puede calcular/.test(text('fuel_verdict')));assert.equal(nodes.get('fuel_apply').disabled,true);assert.equal(pill('st_fuel').cls,'bad');
   WIND.fn=()=>null;run('recalc()');near(run('TRIP.total'),base,1e-9);
@@ -284,7 +298,10 @@ assert.notEqual(run('SUM.wb'),null);assert.notEqual(nodes.get('ld_fig').innerHTM
 set('elev',0);set('oat',45);run('recalc()');assert(run('SUM.to.out'),'OAT 45 °C: fuera de tabla');set('oat',15);run('recalc()');assert.equal(run('SUM.to.out'),undefined);
 // la pista corta se marca en el resumen de arriba
 assert.equal(pill('st_rwy').txt,'Sin ruta');assert.equal(pill('st_rwy').cls,'off');
-ROUTE.pts=[SCTB,SCRG,SCSE];set('to_len',900);run('recalc()');assert.equal(run('SUM.to.ok'),'bad');assert.equal(pill('st_rwy').cls,'bad');assert(/No cabe/.test(pill('st_rwy').txt));set('to_len',3000);run('recalc()');assert.equal(pill('st_rwy').cls,'ok');ROUTE.pts=[];run('recalc()');
+ROUTE.pts=[SCTB,SCRG,SCSE];set('to_len',900);run('recalc()');assert.equal(run('SUM.to.ok'),'bad');assert.equal(pill('st_rwy').cls,'bad');assert(/No cabe/.test(pill('st_rwy').txt));set('to_len',3000);run('recalc()');
+// cabe, pero con las condiciones por defecto (sin confirmar) la píldora no dice «Cabes»: queda en ámbar
+assert.equal(pill('st_rwy').cls,'warn');assert.equal(pill('st_rwy').txt,'Sin confirmar');
+confirmCond();assert.equal(pill('st_rwy').cls,'ok');assert.equal(pill('st_rwy').txt,'Cabes');ROUTE.pts=[];run('recalc()');
 
 // ---------------------------------------------------------------- margen de seguridad seleccionable
 set('elev',0);set('qnh',1013.25);set('oat',15);set('to_surf',1);set('wspd',0);set('to_len',3000);set('wdir',270);towTo(2400);
@@ -410,6 +427,74 @@ for(const id of ['chart','to_fig','ld_fig','to_out','ld_out','fuel_out','fuel_ve
 }
 
 
+// ---------------------------------------------------------------- nada se supone en silencio: condiciones sin confirmar, peso ejemplo, revisión y BORRADOR
+{
+  const pend=w=>JSON.parse(run('JSON.stringify(condPending("'+w+'"))'));
+  const defaults=()=>{DEP.forEach((id,i)=>set(id,[270,0,15,1013][i]));ARR.forEach((id,i)=>set(id,[270,0,15,1013][i]));};
+  pick('c172s');set('fl_from','SCTB');set('fl_to','SCSE');ROUTE.pts=[SCTB,SCRG,SCSE];WIND.fn=(p,q)=>q===SCRG?{dir:148,spd:2}:{dir:24,spd:3};
+  set('r_mode','poh');set('r_alt',6000);set('r_rpm',2500);set('r_isa',0);set('r_extra',0);set('r_res',30);set('r_taxi',1.4);set('ru_var',0.9);
+  g.VIAJE.etdMs=()=>Date.UTC(2026,10,26,21,0);g.VIAJE.provenance=()=>'2 tramos con pronóstico de modelo de Open-Meteo.com (obtenido 20:26)';
+  set('f_gal',40);
+
+  // 1) sin nada escrito ni pronóstico: todo por confirmar, y los valores por defecto no se pasan por datos
+  run('COND={}');defaults();run('recalc()');
+  assert.deepEqual(pend('dep'),['viento','temperatura','QNH']);assert.deepEqual(pend('arr'),['viento','temperatura','QNH']);
+  assert(/Sin confirmar: viento, temperatura, QNH/.test(text('dep_cond'))&&/Sin confirmar/.test(text('arr_cond')),'aviso visible en Pista');
+  assert(/Resultado provisorio/.test(text('to_notes'))&&/Resultado provisorio/.test(text('ld_notes')));
+  assert.deepEqual(JSON.parse(run('JSON.stringify(SUM.to.prov)')),['viento','temperatura','QNH']);
+  assert.equal(pill('st_rwy').txt,'Sin confirmar');assert.notEqual(pill('st_rwy').cls,'ok');
+  assert.equal(g.APP.cond('dep').src,null);
+  // 2) escribir un campo lo confirma; el viento con velocidad > 0 exige también la dirección
+  run("touchCond('dep','wspd')");assert.deepEqual(pend('dep'),['temperatura','QNH'],'viento 0 kt escrito: calma confirmada');
+  set('wspd',10);assert.deepEqual(pend('dep'),['dirección del viento','temperatura','QNH'],'con viento > 0 falta la dirección');
+  run("touchCond('dep','wdir')");run("touchCond('dep','oat')");assert.deepEqual(pend('dep'),['QNH']);
+  run("touchCond('dep','qnh')");assert.deepEqual(pend('dep'),[]);assert.deepEqual(pend('arr'),['viento','temperatura','QNH'],'la llegada es independiente');
+  run('recalc()');assert.equal(text('dep_cond'),'');assert(/Sin confirmar/.test(text('arr_cond')));assert.equal(g.APP.cond('dep').src,'manual');
+  // 3) cambiar de aeródromo borra lo confirmado y vuelve a los valores por defecto
+  set('fl_from','SCRG');run('recalc()');
+  assert.deepEqual(pend('dep'),['viento','temperatura','QNH']);assert.equal(nodes.get('wspd').value,'0');assert.equal(nodes.get('qnh').value,'1013');assert.equal(g.APP.cond('dep').src,null);
+  set('fl_from','SCTB');run('recalc()');
+  // 4) el pronóstico completo confirma los cuatro campos (el viento verdadero pasa a magnético); incompleto, solo lo que trajo
+  const etd=g.VIAJE.etdMs();
+  g.APP.setMet('dep',{dir:270,spd:5,tmp:12,qnh:1015},etd);
+  assert.equal(nodes.get('wdir').value,'269','viento verdadero 270° − variación 0,9° E = 269° mag.');assert.equal(nodes.get('wspd').value,'5');assert.equal(nodes.get('oat').value,'12');assert.equal(nodes.get('qnh').value,'1015');
+  assert.deepEqual(pend('dep'),[]);assert.equal(g.APP.cond('dep').src,'forecast');
+  run("touchCond('dep','oat')");assert.equal(g.APP.cond('dep').edited,true,'editar un campo del pronóstico se registra');assert.deepEqual(pend('dep'),[]);
+  g.APP.setMet('dep',{dir:270,spd:5,tmp:12,qnh:1015},etd+3600000);assert.deepEqual(pend('dep'),['pronóstico desactualizado'],'pronóstico para otra hora que la salida');
+  g.APP.setMet('dep',{dir:270,spd:5,tmp:12,qnh:1015},etd);run('COND.dep.at=Date.now()-4*3600000');assert.deepEqual(pend('dep'),['pronóstico desactualizado'],'pronóstico de hace más de 3 h');
+  g.APP.setMet('arr',{dir:null,spd:null,tmp:9,qnh:null},null);assert.deepEqual(pend('arr'),['viento','QNH'],'pronóstico incompleto: solo confirma lo que trajo');
+  g.APP.setMet('arr',{dir:200,spd:0,tmp:9,qnh:1010},null);assert.deepEqual(pend('arr'),[],'la llegada no se compara con la hora de salida');
+  g.APP.setMet('dep',{dir:270,spd:5,tmp:12,qnh:1015},etd);
+
+  // 5) el peso vacío del ejemplo del POH no es el de una matrícula
+  pick('c172s');run('recalc()');assert.equal(run('emptyIsExample()'),true,'al elegir el modelo el peso vacío es el ejemplo del POH');
+  assert.equal(pill('st_wb').txt,'Peso ejemplo');assert.equal(pill('st_wb').cls,'warn');assert.equal(g.APP.emptyIsExample(),true);
+  set('w_empty',+nodes.get('w_empty').value+5/run('wf'));run('recalc()');assert.equal(run('emptyIsExample()'),false);assert.equal(pill('st_wb').txt,'Dentro de límites');assert.equal(pill('st_wb').cls,'ok');
+
+  // 6) revisión previa y sello BORRADOR en la bitácora
+  const R=()=>g.PVO.review(),by=k=>R().items.find(i=>i.k===k);
+  run('COND={}');defaults();run('recalc()');WIND.fn=()=>null;run('recalc()');
+  assert.equal(by('Viento en la ruta').st,'warn');assert.equal(by('Condiciones de pista (salida)').st,'warn');assert.equal(by('Condiciones de pista (llegada)').st,'warn');
+  assert.equal(by('Combustible').st,'warn','alcanza, pero con viento supuesto: provisorio');assert.equal(by('Ruta').st,'ok');assert.equal(by('Meteorología oficial').st,'info');
+  let S=g.PVO.build();assert(S.stamp&&/^BORRADOR · pendiente:/.test(S.stamp.text)&&/Viento en la ruta/.test(S.stamp.text),'sello BORRADOR con lo que falta');assert.equal(S.stamp.bad,false);
+  assert(/^Supuestos de esta hoja:/.test(S.notes[0]),'los supuestos van primero en las notas');assert(/BORRADOR/.test(g.PVO.asText(S)),'el texto copiable también lleva el sello');
+  g.AD={get:i=>({i,n:i,el:0,rw:[]}),freqShort:()=>''};S=g.PVO.build();g.AD=null;   // aeródromos mínimos de prueba: sin ellos la hoja no arma la caja «Pista»
+  assert(/PROVISORIO: sin confirmar viento, temperatura, QNH/.test(JSON.stringify(S.boxes)),'las condiciones por defecto salen marcadas en la hoja');
+  doc.body.dataset.view='pvo';   // la bitácora solo se pinta cuando el paso PVO está a la vista
+  g.PVO.render();assert(/BORRADOR/.test(nodes.get('pvo_review').innerHTML)&&/Revisar/.test(nodes.get('pvo_review').innerHTML),'la tarjeta de revisión lista lo pendiente y ofrece «Revisar»');
+  // todo confirmado: sin sello y con la tarjeta en verde
+  WIND.fn=(p,q)=>q===SCRG?{dir:148,spd:2}:{dir:24,spd:3};confirmCond();
+  assert.deepEqual([...R().pending.map(i=>i.k)],[],'con todo confirmado no queda nada pendiente');S=g.PVO.build();assert.equal(S.stamp,null);assert(!/BORRADOR/.test(g.PVO.asText(S)));
+  assert(!/Supuestos de esta hoja/.test(S.notes.join(' ')));
+  g.PVO.render();assert(/Todo revisado/.test(nodes.get('pvo_review').innerHTML)&&!/BORRADOR/.test(nodes.get('pvo_review').innerHTML));
+  // peso vacío de ejemplo: vuelve a ser borrador
+  pick('c172s');confirmCond();assert.equal(by('Avión').st,'warn');assert(g.PVO.build().stamp,'peso vacío del ejemplo => BORRADOR');
+  // un punto «malo» (no alcanza el combustible) marca el sello como crítico
+  set('w_empty',+nodes.get('w_empty').value+5/run('wf'));set('f_gal',20);run('recalc()');S=g.PVO.build();assert(S.stamp&&S.stamp.bad===true,'combustible insuficiente: sello crítico');
+  set('f_gal',40);ROUTE.pts=[];WIND.fn=()=>null;doc.body.dataset.view='';run('recalc()');
+}
+
+
 // ---------------------------------------------------------------- base de aeródromos: datos y buscador
 const AD=JSON.parse(fs.readFileSync(__dirname+'/data/aerodromos.json','utf8'));
 {
@@ -469,5 +554,5 @@ const AD=JSON.parse(fs.readFileSync(__dirname+'/data/aerodromos.json','utf8'));
   // la ruta usa coordenadas completas
   const rt=A.route(A.get('SCTB'),A.get('SCVI'));assert(rt&&rt.nm>330&&rt.nm<400,'ruta SCTB → SCVI');
   assert.equal(A.route(A.get('SCTB'),{lat:null,lon:-70}),null,'sin coordenadas no hay ruta (la app lo avisa en vez de usar una distancia vieja)');
-  console.log('PASS: integridad de las 5 tablas POH (M, N, P, R, S), valores exactos e interpolación contra el POH, viento/hierba/sobrepeso, fuera de tabla, cambio de modelo y tanques, kg/L, validaciones y salidas finitas, margen seleccionable, crucero/ascenso del POH (celdas exactas, interpolación, fuera de tabla), combustible por tramos con viento (veredicto, alterno, tanque, modo manual), bitácora PVO, datos y buscador de aeródromos.');
+  console.log('PASS: integridad de las 5 tablas POH (M, N, P, R, S), valores exactos e interpolación contra el POH, viento/hierba/sobrepeso, fuera de tabla, cambio de modelo y tanques, kg/L, validaciones y salidas finitas, margen seleccionable, crucero/ascenso del POH (celdas exactas, interpolación, fuera de tabla), combustible por tramos con viento (veredicto, alterno, tanque, modo manual), bitácora PVO, condiciones sin confirmar (provisorio), peso ejemplo, revisión previa y sello BORRADOR, datos y buscador de aeródromos.');
 })();

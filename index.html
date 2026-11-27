@@ -273,6 +273,7 @@
       <h2>Condiciones en la salida</h2>
       <button type="button" class="mini wide" id="dep_met">Usar el pronóstico de viento, temperatura y QNH</button>
       <p class="hint" id="dep_met_note"></p>
+      <div id="dep_cond"></div>
       <div class="form">
         <label>Viento desde (° magnéticos)<input id="wdir" type="number" min="0" max="360" value="270"></label>
         <label>Viento (kt)<input id="wspd" type="number" min="0" value="0"></label>
@@ -319,6 +320,7 @@
       <h2>Condiciones en la llegada</h2>
       <button type="button" class="mini wide" id="arr_met">Usar el pronóstico de viento, temperatura y QNH</button>
       <p class="hint" id="arr_met_note"></p>
+      <div id="arr_cond"></div>
       <div class="form">
         <label>Viento desde (° magnéticos)<input id="a_wdir" type="number" min="0" max="360" value="270"></label>
         <label>Viento (kt)<input id="a_wspd" type="number" min="0" value="0"></label>
@@ -353,6 +355,7 @@
 <!-- ============ 6 · PVO ============ -->
 <section id="pvo" class="tab">
   <div class="pagehead"><h1><i class="stepno">6</i>PVO</h1><p>Bitácora de navegación de tu ruta, lista para imprimir o llevar en el celular.</p></div>
+  <div id="pvo_review" class="card noprint" aria-live="polite"></div>
   <div id="pvo_none" class="msg warn" hidden>Arma una ruta con al menos dos puntos (paso 2) para generar la bitácora.</div>
   <div id="pvo_body">
     <div class="card noprint">

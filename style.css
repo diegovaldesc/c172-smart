@@ -406,3 +406,28 @@ label.gap{display:block}
 .pv-line.long{display:block}
 .pv-line.long span{display:block;max-width:none;font-weight:700}
 .pv-line.long b{display:block;text-align:left;font-weight:400;font-size:11.5px;line-height:1.35}
+
+/* provisorio: lo que no es un dato se ve en ámbar y con una acción para resolverlo */
+.verdict .linkbtn{align-self:flex-start;margin-top:4px;font-size:14px}
+.verdict.warn b{color:var(--warn)}
+#dep_cond .msg,#arr_cond .msg{margin:8px 0}
+
+/* revisión antes del PVO */
+#pvo_review h2{margin-bottom:6px}
+.rv-sum{margin:0 0 8px;font-weight:700}
+.rv-sum.ok{color:var(--ok)}.rv-sum.warn{color:var(--warn)}.rv-sum.bad{color:var(--bad)}
+.rv-list{list-style:none;margin:0;padding:0}
+.rv-list li{display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-top:1px solid var(--line)}
+.rv-list li:first-child{border-top:0}
+.rv-ic{flex:none;width:22px;height:22px;display:grid;place-items:center;border-radius:50%;font:700 13px/1 var(--mono);font-style:normal;color:#fff;background:#8a93a0;margin-top:1px}
+.rv-ok .rv-ic{background:var(--ok)}.rv-warn .rv-ic{background:var(--warn)}.rv-bad .rv-ic{background:var(--bad)}
+.rv-t{flex:1;min-width:0;font-size:14px;line-height:1.35}
+.rv-t b{display:block}
+.rv-t span{color:var(--mut)}
+.rv-warn .rv-t span,.rv-bad .rv-t span{color:var(--txt)}
+.rv-list .mini{flex:none;align-self:center}
+
+/* marca de borrador en la hoja (también al imprimir) */
+.pv-stamp{border:2px solid #b97a0c;background:#fbf0d4;color:#5e4309;font-weight:800;font-size:12.5px;letter-spacing:.3px;padding:5px 9px;margin:0 0 8px;text-transform:uppercase}
+.pv-stamp.bad{border-color:#b83226;background:#f8dedb;color:#5e1912}
+@media print{.pv-stamp{-webkit-print-color-adjust:exact;print-color-adjust:exact}}

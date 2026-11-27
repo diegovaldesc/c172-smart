@@ -171,8 +171,8 @@
     btn.disabled = false;
     const m = DATA.met && metOk() ? DATA.met[which] : null;
     if (!m || m.dir == null) { note.textContent = 'No se pudo obtener el pronóstico (sin internet o la hora de salida está fuera de su alcance). Escribe las condiciones a mano.'; return; }
-    APP().setMet(which, m);
     const when = which === 'dep' ? DATA.met.etd : DATA.met.etaMs;
+    APP().setMet(which, m, when);
     note.textContent = `Pronóstico de modelo para ${dayhm(when)}: viento ${pad3(m.dir)}° verdadero (${pad3(((m.dir - APP().variation()) % 360 + 360) % 360)}° magnético) ${nf(m.spd)} kt, ${nf(m.tmp, 0)} °C, ${nf(m.qnh, 0)} hPa (presión a nivel del mar del modelo, parecida al QNH). Es referencial: confírmalo con el METAR o el ATIS.`;
   }
 

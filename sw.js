@@ -1,4 +1,4 @@
-const CACHE = 'c172smart-v15';
+const CACHE = 'c172smart-v16';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'modelos.js', 'aerodromos.js', 'ruta.js', 'viento.js', 'viaje.js', 'pvo.js', 'mapa.js', 'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css', 'data/aerodromos.json', 'data/espacios.json', 'data/canales.json', 'data/rutas_visuales.json', 'manifest.webmanifest', 'icon.svg'];
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES))));
 self.addEventListener('activate', e => e.waitUntil(

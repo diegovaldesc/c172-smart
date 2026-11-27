@@ -459,7 +459,58 @@ function calcPerf() {
     drawRunway('ld_fig', { kind: 'ld', len: lenL, a: Math.max(0, l50 - lgr), b: l50, need: needL, ok: okL, rwy: num('a_rwy'), mp });
     SUM.ld = { need: needL, len: lenL, ok: okL, mp };
   }
+
+  // ¿las condiciones son datos o valores por defecto? Si faltan, el resultado es provisorio y se dice en la pantalla
+  [['dep', SUM.to, 'to_notes'], ['arr', SUM.ld, 'ld_notes']].forEach(([w, s, notes]) => {
+    const p = condPending(w), m = condMsg(w);
+    $(w + '_cond').innerHTML = m ? `<div class="msg warn">${m}</div>` : '';
+    if (s) s.prov = p;
+    if (p.length) $(notes).innerHTML = '<div class="msg warn">Resultado provisorio: faltan confirmar las condiciones (arriba).</div>' + $(notes).innerHTML;
+  });
 }
+
+// ---------- Condiciones de pista: ¿son datos o los valores por defecto? ----------
+// Los campos de viento, temperatura y QNH parten con valores por defecto para que las cuentas funcionen, pero eso no es un dato:
+// cuenta como «confirmado» solo si viene del pronóstico o si el piloto escribió ese campo. Se guarda aparte y vale para ese aeródromo.
+const COND_KEY = 'c172smart.cond';
+const CONDS = { dep: { ids: ['wdir', 'wspd', 'oat', 'qnh'], ad: 'fl_from' }, arr: { ids: ['a_wdir', 'a_wspd', 'a_oat', 'a_qnh'], ad: 'fl_to' } };
+const COND_DEF = [270, 0, 15, 1013];
+const COND_OF = {};
+Object.entries(CONDS).forEach(([w, c]) => c.ids.forEach(id => { COND_OF[id] = w; }));
+let COND = (() => { try { return JSON.parse(localStorage.getItem(COND_KEY)) || {}; } catch (e) { return {}; } })();
+const saveCond = () => { try { localStorage.setItem(COND_KEY, JSON.stringify(COND)); } catch (e) { /* sin almacenamiento */ } };
+// Si el aeródromo cambió, lo confirmado ya no vale (otro lugar, otra hora): se vuelve a los valores por defecto y a «sin confirmar»
+function syncConds() {
+  Object.entries(CONDS).forEach(([w, c]) => {
+    const s = COND[w], icao = $(c.ad).value;
+    if (s && icao && s.ad && s.ad !== icao) { c.ids.forEach((id, i) => { $(id).value = COND_DEF[i]; }); COND[w] = null; saveCond(); }
+  });
+}
+function touchCond(which, id) {
+  const s = COND[which], icao = $(CONDS[which].ad).value;
+  if (s && s.src === 'forecast') { s.edited = true; s.ad = s.ad || icao; }
+  else if (s) { if (!s.touched.includes(id)) s.touched.push(id); }
+  else COND[which] = { src: 'manual', ad: icao, at: Date.now(), touched: [id] };
+  saveCond();
+}
+// Qué falta confirmar (lista vacía = todo viene de un dato)
+function condPending(which) {
+  const s = COND[which], c = CONDS[which].ids;
+  if (s && s.src === 'forecast') {
+    const V = window.VIAJE, etd = V && V.etdMs ? V.etdMs() : null;
+    const old = Date.now() - s.at > 3 * 3600000, other = which === 'dep' && s.for && etd != null && Math.abs(s.for - etd) > 2700000;
+    return old || other ? ['pronóstico desactualizado'] : [];
+  }
+  const t = (s && s.touched) || [], out = [];
+  if (!t.includes(c[1])) out.push('viento');
+  else if (num(c[1]) > 0 && !t.includes(c[0])) out.push('dirección del viento');
+  if (!t.includes(c[2])) out.push('temperatura');
+  if (!t.includes(c[3])) out.push('QNH');
+  return out;
+}
+const condMsg = which => { const p = condPending(which); return p.length ? `Sin confirmar: ${p.join(', ')}. Mientras tanto el cálculo usa los valores por defecto de esos campos, que no son datos reales. Toca «Usar el pronóstico» o escribe los del METAR o el ATIS.` : ''; };
+// El peso vacío y el brazo parten con el ejemplo del POH: sirven para probar, no son los de tu matrícula
+const emptyIsExample = () => !!MODEL && Math.abs(num('w_empty') * wf - MODEL.empty.w) < 0.6 && Math.abs(num('a_empty') - MODEL.empty.arm) < 0.006;
 
 // ---------- Viaje: combustible por tramos, viento y estado ----------
 // La ruta (mapa.js) y el viento de cada tramo (viaje.js) son las únicas fuentes: acá se calcula el combustible y se decide si alcanza.
@@ -524,11 +575,13 @@ function calcTrip() {
   const gsAvg = pl.nm - cNm > 0 && pl.min - cMin > 0 ? (pl.nm - cNm) / ((pl.min - cMin) / 60) : prm.tas;
   const reachWith = gal => { const av = gal - prm.taxi - pl.galReserve - galAlt; return av <= pl.galClimb ? 0 : cNm + (av - pl.galClimb) / burn * gsAvg; };
   // avisos sobre el viento usado
+  // wind: 'ok' (todos los tramos con viento vigente) | 'none' | 'partial' | 'stale'. Si no es 'ok' el resultado es provisorio: no se da por bueno un cálculo con calma supuesta.
   const have_w = winds.filter(Boolean), notes = [];
-  if (!have_w.length) notes.push('Sin datos de viento: el cálculo supone aire en calma. Obtén el viento en el paso 3.');
-  else if (have_w.length < winds.length) notes.push('Falta el viento de algún tramo: ahí se supuso aire en calma (paso 3).');
+  const wind = !have_w.length ? 'none' : have_w.length < winds.length ? 'partial' : have_w.some(w => w.stale) ? 'stale' : 'ok';
+  if (wind === 'none') notes.push('Sin viento definido: el cálculo supone aire en calma. Defínelo en el paso 3.');
+  else if (wind === 'partial') notes.push('Falta el viento de algún tramo: ahí se supuso aire en calma (paso 3).');
   if (have_w.some(w => w.stale)) notes.push('Parte del viento viene de un pronóstico viejo o de otra hora o altitud: actualízalo en el paso 3.');
-  TRIP = { pts, prm, pl, winds, alt, galAlt, total, have, cap, over, short, landGal, landMin: burn > 0 ? Math.max(0, landGal) / burn * 60 : 0, reach: reachWith(have), reachFull: reachWith(cap), notes, flightMin: pl.min + (alt ? alt.min : 0) };
+  TRIP = { pts, prm, pl, winds, wind, alt, galAlt, total, have, cap, over, short, landGal, landMin: burn > 0 ? Math.max(0, landGal) / burn * 60 : 0, reach: reachWith(have), reachFull: reachWith(cap), notes, flightMin: pl.min + (alt ? alt.min : 0) };
   enrouteFuel = pl.galEnroute;
   renderCarga();
 }
@@ -543,8 +596,16 @@ function renderCarga() {
   const { prm, pl, alt } = T, resMin = prm.resMin;
   if (T.over) verdict('bad', 'No llegas sin escala', `La ruta pide ${dF(T.total)} y los tanques rinden ${dF(T.cap, 0)}. Con tanques llenos y ${fmt(resMin)} min de reserva alcanzas unas ${fmt(T.reachFull)} NM. Haz escala, baja las RPM o acepta menos reserva.`);
   else if (T.short) verdict('bad', 'El combustible NO alcanza', `Cargaste ${dF(T.have)} y necesitas ${dF(T.total)}: faltan ${diffF(T.total - T.have)}. Con lo cargado llegas hasta unas ${fmt(T.reach)} NM sin tocar la reserva. Usa «Cargar el combustible necesario».`);
+  else if (T.wind !== 'ok') {
+    // alcanza, pero con el viento sin definir: provisorio (ámbar), no «todo bien»
+    const how = { none: 'Se calculó con aire en calma.', partial: 'En los tramos sin dato se supuso aire en calma.', stale: 'El pronóstico de viento es viejo o de otra hora o altitud.' }[T.wind];
+    const d = verdict('warn', { none: 'Provisorio: sin viento definido', partial: 'Provisorio: falta el viento de algún tramo', stale: 'Provisorio: el viento está desactualizado' }[T.wind],
+      `${how} Cargaste ${dF(T.have)} y necesitas ${dF(T.total)}; aterrizarías con ${dF(T.landGal)} (${hm(T.landMin / 60)} de vuelo), ${dF(T.have - T.total)} sobre la reserva de ${fmt(resMin)} min${alt ? ' y el alterno' : ''}. No lo des por bueno hasta definir el viento.`);
+    const b = mk('button', 'Definir el viento (paso 3)', 'linkbtn'); b.type = 'button'; b.dataset.go = 'viento'; d.append(b);
+  }
   else verdict('ok', 'El combustible alcanza', `Cargaste ${dF(T.have)} y necesitas ${dF(T.total)}. Aterrizas con ${dF(T.landGal)} (${hm(T.landMin / 60)} de vuelo): ${dF(T.have - T.total)} sobre la reserva de ${fmt(resMin)} min${alt ? ' y el alterno' : ''}.`);
-  T.notes.forEach(n => V.append(mk('div', n, 'msg warn')));
+  // con el veredicto provisorio el aviso de viento ya está dicho arriba; si no alcanza, se agrega
+  if (T.over || T.short || T.wind === 'ok') T.notes.forEach(n => V.append(mk('div', n, 'msg warn')));
   pl.warns.forEach(w => V.append(mk('div', w, 'msg warn')));
   $('fuel_apply').disabled = T.over;
 
@@ -592,14 +653,20 @@ function renderStatus(valid = true) {
   else if (T.err) setPill('st_fuel', 'bad', 'No se calcula');
   else if (T.over) setPill('st_fuel', 'bad', 'No llegas');
   else if (T.short) setPill('st_fuel', 'bad', `Faltan ${diffF(T.total - T.have)}`);
+  else if (T.wind !== 'ok') setPill('st_fuel', 'warn', { none: 'Sin viento', partial: 'Falta viento', stale: 'Viento viejo' }[T.wind]);   // provisorio: no es un «sobran» confiable
   else setPill('st_fuel', 'ok', `Sobran ${dF(T.have - T.total)}`);
   const w = SUM.wb;
-  if (!w) setPill('st_wb', 'off', '—'); else setPill('st_wb', w.ok ? 'ok' : 'bad', w.ok ? 'Dentro de límites' : 'Fuera de límites');
+  if (!w) setPill('st_wb', 'off', '—');
+  else if (!w.ok) setPill('st_wb', 'bad', 'Fuera de límites');
+  else if (emptyIsExample()) setPill('st_wb', 'warn', 'Peso ejemplo');   // dentro de límites, pero con el peso vacío de ejemplo del POH
+  else setPill('st_wb', 'ok', 'Dentro de límites');
   const pr = [SUM.to, SUM.ld].filter(Boolean);
   if (!pr.length || !routePts().length) setPill('st_rwy', 'off', routePts().length ? '—' : 'Sin ruta');   // sin ruta no hay aeródromos: «cabes» sería un dato sin respaldo
   else {
     const rank = { ok: 0, warn: 1, bad: 2 }, worst = pr.reduce((a, b) => (rank[b.ok] > rank[a.ok] ? b : a)), cls = worst.ok;
-    setPill('st_rwy', cls, cls === 'ok' ? 'Cabes' : cls === 'warn' ? 'Sin margen' : worst === SUM.to ? 'No cabe (salida)' : 'No cabe (llegada)');
+    const prov = (SUM.to && SUM.to.prov && SUM.to.prov.length) || (SUM.ld && SUM.ld.prov && SUM.ld.prov.length);
+    if (cls === 'ok' && prov) setPill('st_rwy', 'warn', 'Sin confirmar');   // cabe, pero con condiciones por defecto
+    else setPill('st_rwy', cls, cls === 'ok' ? 'Cabes' : cls === 'warn' ? 'Sin margen' : worst === SUM.to ? 'No cabe (salida)' : 'No cabe (llegada)');
   }
 }
 
@@ -611,11 +678,15 @@ function loadFuel(gal) {
   recalc();
 }
 // Pronóstico de superficie → campos de condiciones de la salida o de la llegada. El viento del pronóstico es verdadero: se pasa a magnético.
-function setMet(which, m) {
-  const ids = which === 'dep' ? ['wdir', 'wspd', 'oat', 'qnh'] : ['a_wdir', 'a_wspd', 'a_oat', 'a_qnh'], vari = num('ru_var');
+function setMet(which, m, when) {
+  const ids = CONDS[which].ids, vari = num('ru_var');
   if (m.dir != null && m.spd != null) { $(ids[0]).value = (Math.round(m.dir - vari) % 360 + 360) % 360; $(ids[1]).value = Math.round(m.spd); }
   if (m.tmp != null) $(ids[2]).value = Math.round(m.tmp);
   if (m.qnh != null) $(ids[3]).value = Math.round(m.qnh);
+  // solo cuenta como confirmado si el pronóstico trajo los cuatro datos
+  if (m.dir != null && m.spd != null && m.tmp != null && m.qnh != null) COND[which] = { src: 'forecast', ad: $(CONDS[which].ad).value, at: Date.now(), for: when || null };
+  else { const t = []; if (m.dir != null && m.spd != null) t.push(ids[0], ids[1]); if (m.tmp != null) t.push(ids[2]); if (m.qnh != null) t.push(ids[3]); COND[which] = { src: 'manual', ad: $(CONDS[which].ad).value, at: Date.now(), touched: t }; }
+  saveCond();
   recalc();
 }
 window.APP = {
@@ -623,6 +694,9 @@ window.APP = {
   fmt, hm, mm, dF, dW, mk, uf: unitF, uw: () => uw(), ff: () => ff, wf: () => wf, num, ptLabel,
   loadFuel, setMet, tankCap: () => LIM.fuelMax, have: () => num('f_gal') * ff, altitude: () => num('r_alt'),
   model: () => MODEL, atmosphere, variation: () => num('ru_var'), wbState, inEnvelope,
+  // qué falta confirmar en las condiciones de pista (salida o llegada) y si el peso vacío es el ejemplo del POH
+  cond: which => { const s = COND[which]; return { pending: condPending(which), src: s ? s.src : null, at: s ? s.at : null, for: s ? s.for || null : null, edited: !!(s && s.edited) }; },
+  emptyIsExample,
 };
 
 // ---------- Modelo: selector y vistas de solo lectura ----------
@@ -806,7 +880,7 @@ function validateInputs() {
   return ok;
 }
 
-const OUTPUT_IDS = ['wb_res', 'wb_msgs', 'chart', 'atm_out', 'a_atm_out', 'to_out', 'ld_out', 'to_fig', 'ld_fig', 'to_notes', 'ld_notes', 'fuel_out', 'fuel_verdict', 'fuel_tbl'];
+const OUTPUT_IDS = ['wb_res', 'wb_msgs', 'chart', 'atm_out', 'a_atm_out', 'to_out', 'ld_out', 'to_fig', 'ld_fig', 'to_notes', 'ld_notes', 'dep_cond', 'arr_cond', 'fuel_out', 'fuel_verdict', 'fuel_tbl'];
 // Los pesos de despegue y aterrizaje para Performance salen solos de Carga: despegue = rampa − rodaje; aterrizaje = despegue − combustible de la ruta
 function setPerfWeights() {
   const to = Math.round(TOW / wf), ld = Math.round(Math.max(0, TOW - enrouteFuel * LIM.lbPerGal) / wf);
@@ -817,6 +891,7 @@ function setPerfWeights() {
     : `Peso de aterrizaje ${dW(TOW)}: sin ruta no se descuenta combustible (del lado conservador).`;
 }
 function recalc() {
+  syncConds();
   save();
   syncMode();
   readModel();
@@ -846,7 +921,11 @@ document.querySelectorAll('.seg').forEach(seg => seg.addEventListener('click', e
   const b = e.target.closest('button[data-sub]');
   if (b) showSub(b.dataset.sub);
 }));
-document.querySelectorAll(FIELDS).forEach(e => { if (!['u_w', 'u_f', 'fl_model'].includes(e.id)) e.addEventListener('input', recalc); });
+document.querySelectorAll(FIELDS).forEach(e => {
+  if (['u_w', 'u_f', 'fl_model'].includes(e.id)) return;
+  // escribir en un campo de viento, temperatura o QNH lo confirma (ya no es el valor por defecto)
+  e.addEventListener('input', () => { if (COND_OF[e.id]) touchCond(COND_OF[e.id], e.id); recalc(); });
+});
 $('u_w').addEventListener('change', onUnitChange);
 $('u_f').addEventListener('change', onUnitChange);
 $('fl_model').addEventListener('change', () => { setModel($('fl_model').value, true); recalc(); });

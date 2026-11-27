@@ -10,6 +10,50 @@
   const clock = ms => new Date(ms).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', hour12: false });
   const dateTxt = ms => new Date(ms).toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
+  // ---------- revisión previa: qué está confirmado y qué falta ----------
+  // st: 'ok' | 'warn' (falta confirmar: el resultado es provisorio) | 'bad' (no se puede dar por bueno) | 'info' (recordatorio)
+  function review() {
+    const A = APP(), T = A.trip(), V = window.VIAJE, M = A.model(), SUM = A.sum();
+    const pts = (window.MAPA && window.MAPA.route) ? window.MAPA.route() : [];
+    const items = [], add = (k, st, txt, go) => items.push({ k, st, txt, go });
+    if (pts.length < 2) add('Ruta', 'bad', 'Falta armar la ruta con origen y destino.', 'ruta');
+    else add('Ruta', 'ok', pts.map((p, i) => A.ptLabel(p, i)).join(' → ') + (T && T.pl ? ` · ${nf(T.pl.nm)} NM` : ''), 'ruta');
+    const ex = A.emptyIsExample();
+    add('Avión', ex ? 'warn' : 'ok', ex ? `${M.nombre}: el peso vacío y el brazo son el ejemplo del POH, no los de tu matrícula.` : `${M.nombre}, con el peso vacío que ingresaste.`, 'plane');
+    const wb = SUM.wb;
+    add('Peso y balance', !wb ? 'bad' : wb.ok ? 'ok' : 'bad', !wb ? 'Hay datos incompletos o fuera de rango.' : wb.ok ? `Dentro de límites, ${A.dW(wb.margin)} bajo el MTOW.` : 'Fuera de límites: revísalo.', 'carga');
+    if (!T || T.none) add('Combustible', 'bad', 'Sin ruta no hay cálculo.', 'ruta');
+    else if (T.err) add('Combustible', 'bad', 'No se puede calcular: ' + T.err, 'carga');
+    else if (T.over) add('Combustible', 'bad', 'No llegas sin escala con los tanques llenos.', 'carga');
+    else if (T.short) add('Combustible', 'bad', `No alcanza: faltan ${A.dF(T.total - T.have)}.`, 'carga');
+    else add('Combustible', T.wind === 'ok' ? 'ok' : 'warn', `Alcanza: aterrizas con ${A.dF(Math.max(0, T.landGal))}${T.wind === 'ok' ? '' : ' (provisorio: el viento no está definido)'}.`, 'carga');
+    if (T && T.wind) add('Viento en la ruta', T.wind === 'ok' ? 'ok' : 'warn',
+      T.wind === 'ok' ? V.provenance() : { none: 'Sin viento definido: se supuso aire en calma.', partial: 'Falta el viento de algún tramo: ahí se supuso calma.', stale: 'El viento está desactualizado.' }[T.wind], 'viento');
+    else add('Viento en la ruta', 'warn', 'Sin viento definido: se supondría aire en calma.', 'viento');
+    [['dep', 'salida'], ['arr', 'llegada']].forEach(([w, name]) => {
+      const c = A.cond(w);
+      add(`Condiciones de pista (${name})`, c.pending.length ? 'warn' : 'ok', c.pending.length ? `Sin confirmar: ${c.pending.join(', ')}.` : c.src === 'forecast' ? `Pronóstico de modelo${c.edited ? ' (editado a mano)' : ''}.` : 'Escritas por ti.', 'pista');
+    });
+    add('Meteorología oficial', 'info', 'METAR, TAF y NOTAM: revísalos tú antes de salir; la app no los consulta.');
+    return { items, pending: items.filter(i => i.st === 'warn' || i.st === 'bad') };
+  }
+  const ICON = { ok: '✔', warn: '⚠', bad: '✖', info: 'ⓘ' };
+  function paintReview() {
+    const box = $('pvo_review'), R = review(), n = R.pending.length, bad = R.items.some(i => i.st === 'bad');
+    box.replaceChildren();
+    box.append(mk('h2', 'Revisión antes de generar el PVO'));
+    box.append(mk('p', n ? `${n} punto${n > 1 ? 's' : ''} por revisar: el PVO saldrá marcado como BORRADOR.` : 'Todo revisado: el PVO saldrá sin marca de borrador.', 'rv-sum ' + (bad ? 'bad' : n ? 'warn' : 'ok')));
+    const ul = mk('ul', null, 'rv-list');
+    R.items.forEach(i => {
+      const li = mk('li', null, 'rv-' + i.st), t = mk('div', null, 'rv-t');
+      t.append(mk('b', i.k), mk('span', i.txt));
+      li.append(mk('i', ICON[i.st], 'rv-ic'), t);
+      if ((i.st === 'warn' || i.st === 'bad') && i.go) { const b = mk('button', 'Revisar', 'mini'); b.type = 'button'; b.dataset.go = i.go; li.append(b); }
+      ul.append(li);
+    });
+    box.append(ul);
+  }
+
   // La hoja se arma una vez como datos (head, rows, boxes, notes) y se pinta en pantalla y como texto copiable
   function build() {
     const A = APP(), T = A.trip();
@@ -63,11 +107,11 @@
         ['Límite de despegue', `${A.dW(M.w.mtow)} (MTOW)`],
       ]]);
     }
-    const S = A.sum(), perf = (s, ap, rw, wd, ws, tmp, qnh, len) => !ap ? null : [`${ap.i} · pista ${rw || '—'}`, s ? (s.out ? s.out : `${s.ok === 'ok' ? '✔' : s.ok === 'warn' ? '⚠' : '⚠ NO CABE'} pide ${nf(s.need)} ft${s.mp > 0 ? ` (con +${nf(s.mp)} %)` : ''} de ${nf(len)} ft · viento ${wd || '—'}°/${nf(ws)} kt mag. · ${nf(tmp)} °C · QNH ${nf(qnh)}`) : 'sin cálculo'];
+    const S = A.sum(), perf = (s, ap, rw, wd, ws, tmp, qnh, len, prov) => !ap ? null : [`${ap.i} · pista ${rw || '—'}`, s ? (s.out ? s.out : `${s.ok === 'ok' ? '✔' : s.ok === 'warn' ? '⚠' : '⚠ NO CABE'} pide ${nf(s.need)} ft${s.mp > 0 ? ` (con +${nf(s.mp)} %)` : ''} de ${nf(len)} ft · viento ${wd || '—'}°/${nf(ws)} kt mag. · ${nf(tmp)} °C · QNH ${nf(qnh)}${prov.length ? ` · ⚠ PROVISORIO: sin confirmar ${prov.join(', ')} (se usaron valores por defecto)` : ''}`) : 'sin cálculo'];
     const g = id => $(id).value, apO = AD ? AD.get(g('fl_from')) : null, apD = AD ? AD.get(g('fl_to')) : null;
     const pr = [];
-    const a1 = perf(S.to, apO, g('rwy'), g('wdir'), +g('wspd') || 0, +g('oat') || 0, +g('qnh') || 0, +g('to_len') || 0); if (a1) pr.push(['Despegue ' + a1[0], a1[1]]);
-    const a2 = perf(S.ld, apD, g('a_rwy'), g('a_wdir'), +g('a_wspd') || 0, +g('a_oat') || 0, +g('a_qnh') || 0, +g('ld_len') || 0); if (a2) pr.push(['Aterrizaje ' + a2[0], a2[1]]);
+    const a1 = perf(S.to, apO, g('rwy'), g('wdir'), +g('wspd') || 0, +g('oat') || 0, +g('qnh') || 0, +g('to_len') || 0, A.cond('dep').pending); if (a1) pr.push(['Despegue ' + a1[0], a1[1]]);
+    const a2 = perf(S.ld, apD, g('a_rwy'), g('a_wdir'), +g('a_wspd') || 0, +g('a_oat') || 0, +g('a_qnh') || 0, +g('ld_len') || 0, A.cond('arr').pending); if (a2) pr.push(['Aterrizaje ' + a2[0], a2[1]]);
     if (pr.length) boxes.push(['Pista', pr]);
 
     // frecuencias de los aeródromos de la ruta (y el alterno)
@@ -87,7 +131,10 @@
     const notes = [...T.notes];
     notes.push('Hoja de apoyo a la planificación: no sustituye al POH/AFM, al AIP, al NOTAM ni a la información meteorológica oficial (METAR/TAF/DMC). El piloto al mando decide.');
     if (/Open-Meteo/.test(V.provenance())) notes.push('Datos de viento: Open-Meteo.com (CC BY 4.0), pronóstico de modelo numérico, referencial.');
-    return { head, cols, rows, foot, boxes, notes, made: Date.now() };
+    // marca de borrador: lo pendiente queda a la vista en la hoja (y en lo que se imprime)
+    const R = review(), stamp = R.pending.length ? { bad: R.items.some(i => i.st === 'bad'), text: 'BORRADOR · pendiente: ' + R.pending.map(i => i.k).join('; ') } : null;
+    if (stamp) notes.unshift('Supuestos de esta hoja: ' + R.pending.map(i => `${i.k} (${i.txt.replace(/\.$/, '')})`).join(' · ') + '.');
+    return { head, cols, rows, foot, boxes, notes, stamp, made: Date.now() };
   }
 
   // ---------- pantalla ----------
@@ -95,6 +142,7 @@
     const sheet = $('pvo_sheet'); sheet.replaceChildren();
     const top = mk('div', null, 'pv-top'); top.append(mk('h2', 'PVO · Bitácora de navegación'), mk('small', 'C172 Smart'));
     sheet.append(top);
+    if (S.stamp) sheet.append(mk('div', S.stamp.text, 'pv-stamp' + (S.stamp.bad ? ' bad' : '')));
     const hd = mk('div', null, 'pv-head');
     S.head.forEach(([k, v]) => { const c = mk('div'); c.append(mk('span', k), mk('b', v)); hd.append(c); });
     sheet.append(hd);
@@ -118,7 +166,7 @@
     sheet.append(nt);
   }
   function asText(S) {
-    const t = ['PVO · BITÁCORA DE NAVEGACIÓN (C172 Smart)', ''];
+    const t = ['PVO · BITÁCORA DE NAVEGACIÓN (C172 Smart)', ...(S.stamp ? [S.stamp.text] : []), ''];
     S.head.forEach(([k, v]) => t.push(`${k}: ${v}`));
     t.push('', 'TRAMOS  [ruta verd. · viento · rumbo mag. · dist · suelo · ETE · ETA · comb. · queda]');
     S.rows.forEach(r => { const c = r.cells; t.push(`${c[0]}  |  ${[c[1] && 'RV ' + c[1], c[2] && 'viento ' + c[2], c[5] && 'RM ' + c[5], c[6] && c[6] + ' NM', c[8] && 'GS ' + c[8], c[9], c[10] && 'ETA ' + c[10], c[11], c[12] && 'queda ' + c[12]].filter(Boolean).join(' · ')}`); });
@@ -131,6 +179,7 @@
   let lastText = '';
   function render() {
     if (document.body.dataset.view !== 'pvo') return;              // solo se arma cuando se mira
+    paintReview();
     const S = build(), none = !S;
     $('pvo_none').hidden = !none; $('pvo_body').hidden = none;
     if (none) { const T = APP().trip(); $('pvo_none').textContent = T && T.err ? 'No se puede armar la bitácora: ' + T.err : 'Arma una ruta con al menos dos puntos (paso 2) y revisa que los datos estén completos para generar la bitácora.'; lastText = ''; return; }
@@ -145,5 +194,5 @@
     try { await navigator.clipboard.writeText(lastText); st.textContent = 'Copiado. Puedes pegarlo en un mensaje o un documento.'; }
     catch (e) { st.textContent = 'No se pudo copiar automáticamente. Usa «Imprimir o guardar como PDF».'; }
   });
-  window.PVO = { build, asText, render };
+  window.PVO = { build, asText, render, review };
 })();
