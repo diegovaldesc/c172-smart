@@ -55,9 +55,8 @@ function readModel() {
     taxi: num('r_taxi') * ff, xw: m.v.xw
   };
   $('d_front').textContent = LIM.front; $('d_rear').textContent = LIM.rear;
-  $('d_bagA').textContent = LIM.bagA; $('d_bagB').textContent = LIM.bagB; $('d_fuel').textContent = LIM.fuelArm;
+  $('d_bagA').textContent = LIM.bagA; $('d_bagB').textContent = LIM.bagB;
   $('m_bagA').textContent = fmt(LIM.bagAMax / wf); $('m_bagB').textContent = fmt(LIM.bagBMax / wf);
-  $('m_fuel').textContent = fmt(LIM.fuelMax / ff, 1);
 }
 
 // ---------- Tablas del POH: altitud presión × temperatura × peso ----------
@@ -220,6 +219,7 @@ function calcWB() {
     return `<tr><td>${n}</td><td>${fmt(s.w / wf)}</td><td>${fmt(s.cg, 2)}</td><td class="${ok ? 'tag-ok' : 'tag-bad'}">${ok ? '✔ Dentro' : '✖ Fuera'}</td></tr>`;
   }).join('');
   TOW = toff.w;
+  WB = { ramp, toff, zfw };
 
   const msgs = [], issues = [];
   const add = (t, c) => { msgs.push(`<div class="msg ${c}">${t}</div>`); if (c === 'bad') issues.push(t); };
@@ -461,184 +461,169 @@ function calcPerf() {
   }
 }
 
-// ---------- Combustible ----------
-// Plan de vuelo: rodaje/despegue + ascenso + crucero + reserva. Con las tablas del POH (modo "poh") o con valores propios (modo "man").
-let fuelNeeded = 0, enrouteFuel = 0, PLAN = null;
+// ---------- Viaje: combustible por tramos, viento y estado ----------
+// La ruta (mapa.js) y el viento de cada tramo (viaje.js) son las únicas fuentes: acá se calcula el combustible y se decide si alcanza.
+let TRIP = null, WB = null, enrouteFuel = 0;
 const hm = hrs => { const t = Math.round(hrs * 60); return `${Math.floor(t / 60)} h ${String(t % 60).padStart(2, '0')} min`; };
 const mm = min => min < 1 ? '< 1 min' : `${fmt(Math.round(min))} min`;
+const mk = (tag, text, cls) => { const e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; };
+const routePts = () => (window.MAPA && window.MAPA.route) ? window.MAPA.route() : [];
+const windOf = (p, q) => (window.VIAJE && window.VIAJE.windOf) ? window.VIAJE.windOf(p, q) : null;
+const ptLabel = (p, i) => p.i || p.w || ('P' + (i + 1));
+const unitF = () => (uf() === 'L' ? 'L' : 'gal');
+// «faltan 0,0 gal» no dice nada: bajo 0,1 se escribe «menos de 0,1»
+const diffF = gal => gal / ff < 0.05 ? 'menos de 0,1 ' + unitF() : dF(gal);
 
 function syncMode() {
   const poh = $('r_mode').value !== 'man';
-  $('r_poh_f').hidden = !poh; $('r_poh_info').hidden = !poh; $('r_man_f').hidden = poh;
+  $('r_poh_f').hidden = !poh; $('r_poh_info').hidden = !poh; $('r_man_f').hidden = poh; $('r_poh_x').hidden = !poh;
 }
 
-function failFuel(msg) {
-  PLAN = null; fuelNeeded = enrouteFuel = 0;
-  $('fuel_msg').innerHTML = `<div class="msg bad">${msg}</div>`;
-  $('fuel_tbl').replaceChildren(); $('fuel_out').replaceChildren(); $('fuel_note').textContent = '';
-  $('fuel_apply').disabled = true;
-  SUM.fuel = { err: msg };
-}
-
-function calcFuel() {
-  const poh = $('r_mode').value !== 'man';
-  const d = num('r_dist'), wind = num('r_wind'), resMin = num('r_res'), taxi = LIM.taxi, have = num('f_gal') * ff;
-  const warns = [];
-  let tas, burn, bhp = null, climb = { min: 0, gal: 0, nm: 0 }, cruiseTxt, climbTxt, cruiseSub = '', climbSub = '', note;
-
-  if (poh) {
-    const aD = atmosphere(), dev = num('r_isa'), alt = num('r_alt'), rpm = num('r_rpm');
-    const rr = rpmRange(alt);
-    $('r_poh_info').textContent = rr ? `El POH publica de ${fmt(rr[0])} a ${fmt(rr[1])} RPM a ${fmt(alt)} ft.` : '';
-    const cr = cruiseAt(alt, rpm, dev);
-    if (cr.out) return failFuel(cr.out);
-    const c = climbBetween(aD.pa, alt, dev);
-    if (c.out) return failFuel(c.out);
-    tas = cr.tas; burn = cr.gph; bhp = cr.bhp; climb = c;
-    $('r_poh_info').textContent += ` A ${fmt(rpm)} RPM: ${fmt(bhp)} % de potencia, ${fmt(tas)} kt TAS, ${fmt(burn, 1)} gal/h.`;
-    climbTxt = 'Ascenso'; climbSub = `a ${fmt(alt)} ft${aD.pa > 100 ? ', desde ' + fmt(aD.pa) + ' ft' : ''} · ${fmt(c.kias)} KIAS aprox.`;
-    cruiseTxt = 'Crucero'; cruiseSub = `${fmt(alt)} ft · ${fmt(rpm)} RPM · ${fmt(bhp)} %`;
-    if (bhp > 75) warns.push(`Potencia de ${fmt(bhp)} %: sobre el 75 % el consumo sube y el motor trabaja más fuerte. Revisa la sección 4 del POH (crucero).`);
-    note = `Ascenso (Fig. 5-7) y crucero (Fig. 5-8) del POH, mezcla pobre, a ${dW(MODEL.cruise.w)} (el POH no corrige por peso: con menos peso rendirá algo mejor). ` +
-      `Ascenso con gas a fondo en aire calmo${dev > 0 ? `, con +${fmt(dev * 10)} % por ${fmt(dev)} °C sobre la ISA (nota del POH)` : ''}. Valores de avión nuevo: uno con horas consume algo más, para eso está la reserva.`;
-  } else {
-    tas = num('r_tas'); burn = num('r_burn') * ff; climb.gal = num('r_climb') * ff;
-    climbTxt = 'Ascenso (extra)'; cruiseTxt = 'Crucero'; cruiseSub = 'valores manuales';
-    note = 'Modo manual: TAS, consumo y combustible de ascenso son los que ingresaste, no del POH. El ascenso extra se suma al crucero de toda la distancia.';
+// Ascenso y crucero: tablas del POH (con el consumo extra elegido) o valores propios
+function tripParams() {
+  const poh = $('r_mode').value !== 'man', resMin = num('r_res'), taxi = LIM.taxi, alt = num('r_alt');
+  if (!poh) {
+    const tas = num('r_tas'), gph = num('r_burn') * ff;
+    return { tas, gph, climb: { min: 0, gal: num('r_climb') * ff, nm: 0 }, taxi, resMin, alt, poh, extra: 0, info: `Tus valores: ${fmt(tas)} kt, ${fmt(num('r_burn'), 1)} ${unitF()}/h` };
   }
-
-  const gs = tas - wind;
-  if (!(gs > 0)) return failFuel('El viento de frente iguala o supera la velocidad verdadera: no hay avance. Revisa viento y crucero.');
-  if (d < climb.nm) warns.push(`La ruta (${fmt(d)} NM) es más corta que el ascenso hasta esa altitud (${fmt(climb.nm)} NM): el cálculo sobreestima; baja la altitud de crucero.`);
-  const cruiseNm = Math.max(0, d - climb.nm), hrsC = cruiseNm / gs, cruiseGal = hrsC * burn, res = resMin / 60 * burn;
-  const total = taxi + climb.gal + cruiseGal + res, flightHrs = climb.min / 60 + hrsC;
-  const over = total > LIM.fuelMax, short = have + 1e-9 < total;
-  const rangeWith = gal => { const av = gal - taxi - climb.gal - res; return av > 0 ? climb.nm + av / burn * gs : 0; };
-  const rangeLoaded = rangeWith(have), rangeFull = rangeWith(LIM.fuelMax);
-
-  fuelNeeded = total; enrouteFuel = climb.gal + cruiseGal;
-  PLAN = { gs, tas, burn, total, hours: flightHrs, ete: nm => climb.min / 60 + Math.max(0, nm - climb.nm) / gs };
-  $('fuel_apply').disabled = over;   // no se puede cargar lo que no cabe en los tanques
-
-  let msg;
-  if (over) msg = ['bad', `<b>No llegas sin escala.</b> La ruta pide ${dF(total)} y los tanques rinden ${dF(LIM.fuelMax, 0)}. Con tanques llenos y ${fmt(resMin)} min de reserva alcanzas unas ${fmt(rangeFull)} NM a ${fmt(gs)} kt de velocidad suelo. Opciones: hacer escala, bajar RPM o aceptar menos reserva.`];
-  else if (short) msg = ['bad', `<b>El combustible cargado no alcanza.</b> Tienes ${dF(have)} y necesitas ${dF(total)}: faltan ${(total - have) / ff < 0.05 ? 'menos de 0,1 ' + (uf() === 'L' ? 'L' : 'gal') : dF(total - have)}. Con lo cargado llegas hasta unas ${fmt(rangeLoaded)} NM con reserva. Usa el botón de abajo para cargar lo necesario.`];
-  else msg = ['ok', `<b>Alcanza.</b> Con ${dF(have)} llegas con ${dF(have - total)} sobre la reserva de ${fmt(resMin)} min.`];
-  $('fuel_msg').innerHTML = `<div class="msg ${msg[0]}">${msg[1]}</div>` + warns.map(w => `<div class="msg warn">${w}</div>`).join('');
-
-  const row = (a, t, nm, g, sub) => `<tr><td>${a}${sub ? `<small>${sub}</small>` : ''}</td><td>${t}</td><td>${nm}</td><td>${g}</td></tr>`;
-  $('fuel_tbl').innerHTML = '<thead><tr><th>Fase</th><th>Tiempo</th><th>Dist.</th><th>Comb.</th></tr></thead><tbody>' +
-    row('Rodaje + despegue', '—', '—', dF(taxi)) +
-    row(climbTxt, poh ? mm(climb.min) : '—', poh ? fmt(climb.nm) + ' NM' : '—', dF(climb.gal), climbSub) +
-    row(cruiseTxt, hm(hrsC), fmt(cruiseNm) + ' NM', dF(cruiseGal), `${cruiseSub ? cruiseSub + ' · ' : ''}TAS ${fmt(tas)} kt, suelo ${fmt(gs)} kt · ${fmt(burn / ff, 1)} ${uf() === 'L' ? 'L' : 'gal'}/h`) +
-    row('Reserva', mm(resMin), '—', dF(res), `${fmt(resMin)} min a consumo de crucero`) +
-    `</tbody><tfoot><tr><td>Total</td><td>${hm(flightHrs)}</td><td>${fmt(d)} NM</td><td>${dF(total)}</td></tr></tfoot>`;
-
-  $('fuel_out').innerHTML =
-    kpi('Total necesario', dF(total), over || short ? 'bad' : 'ok') +
-    kpi('Tiempo de vuelo', hm(flightHrs)) +
-    kpi('Total en peso', dW(total * LIM.lbPerGal)) +
-    kpi(`Alcance con ${dF(have, 0)} cargados`, fmt(rangeLoaded) + ' NM', short ? 'bad' : '') +
-    kpi(`Alcance con ${dF(LIM.fuelMax, 0)} (llenos)`, fmt(rangeFull) + ' NM');
-  $('fuel_note').textContent = note + ' La distancia es en línea recta entre aeródromos: la ruta real suele ser algo más larga.';
-  SUM.fuel = { need: total, have, max: LIM.fuelMax };
-}
-
-// ---------- Puente para el mapa de rutas (mapa.js) ----------
-// Usa los mismos datos de crucero y ascenso que la pestaña Combustible (tablas del POH o valores manuales).
-function routeParams() {
-  const poh = $('r_mode').value !== 'man', resMin = num('r_res'), taxi = LIM.taxi;
-  if (!poh) return { tas: num('r_tas'), gph: num('r_burn') * ff, climb: { min: 0, gal: num('r_climb') * ff, nm: 0 }, taxi, resMin, alt: num('r_alt'), poh, info: `Valores manuales: ${fmt(num('r_tas'))} kt, ${fmt(num('r_burn'), 1)} ${uf() === 'L' ? 'L' : 'gal'}/h` };
-  const aD = atmosphere(), dev = num('r_isa'), alt = num('r_alt'), rpm = num('r_rpm');
+  const aD = atmosphere(), dev = num('r_isa'), rpm = num('r_rpm'), extra = Math.max(0, num('r_extra')), k = 1 + extra / 100;
+  const rr = rpmRange(alt);
+  $('r_poh_info').textContent = rr ? `El POH publica de ${fmt(rr[0])} a ${fmt(rr[1])} RPM a ${fmt(alt)} ft.` : '';
   const cr = cruiseAt(alt, rpm, dev);
   if (cr.out) return { err: cr.out };
   const c = climbBetween(aD.pa, alt, dev);
   if (c.out) return { err: c.out };
-  return { tas: cr.tas, gph: cr.gph, climb: { min: c.min, gal: c.gal, nm: c.nm }, taxi, resMin, alt, poh, info: `Tablas del POH: ${fmt(alt)} ft, ${fmt(rpm)} RPM, ${fmt(cr.tas)} kt TAS, ${fmt(cr.gph / ff, 1)} ${uf() === 'L' ? 'L' : 'gal'}/h` };
+  $('r_poh_info').textContent += ` A ${fmt(rpm)} RPM: ${fmt(cr.bhp)} % de potencia, ${fmt(cr.tas)} kt TAS, ${fmt(cr.gph / ff, 1)} ${unitF()}/h (POH).`;
+  return { tas: cr.tas, gph: cr.gph * k, climb: { min: c.min, gal: c.gal * k, nm: c.nm }, taxi, resMin, alt, poh, extra, bhp: cr.bhp, kias: c.kias, rpm, dev,
+    info: `Tablas del POH: ${fmt(alt)} ft, ${fmt(rpm)} RPM, ${fmt(cr.tas)} kt TAS, ${fmt(cr.gph * k / ff, 1)} ${unitF()}/h` };
+}
+
+function calcTrip() {
+  TRIP = null; enrouteFuel = 0;
+  const pts = routePts(), prm = tripParams();
+  $('rt_cruise').textContent = prm.err ? '' : prm.info + (prm.extra ? ` (incluye +${fmt(prm.extra)} % de consumo sobre el POH)` : '') + '.';
+  if (pts.length < 2) { TRIP = { none: true, prm }; return renderCarga(); }
+  if (prm.err) { TRIP = { err: prm.err, prm, pts }; return renderCarga(); }
+  const vari = num('ru_var');
+  const winds = pts.slice(1).map((q, i) => windOf(pts[i], q));
+  const pl = RUTA.plan(pts, { tas: prm.tas, gph: prm.gph, climb: prm.climb, taxi: prm.taxi, resMin: prm.resMin, vari, winds: winds.map(w => w ? { dir: w.dir, spd: w.spd } : null) });
+  if (!pl.ok) { TRIP = { err: 'El viento de costado iguala o supera la velocidad verdadera en algún tramo: no hay avance. Revisa el viento (paso 3).', prm, pts, pl, winds }; return renderCarga(); }
+
+  // alterno (opcional): un tramo más desde el destino, a la misma altitud, con el viento del último tramo y sin ascenso (del lado conservador)
+  const AD = window.AD, adAlt = AD ? AD.get($('alt_icao').value) : null, dest = pts[pts.length - 1];
+  let alt = null;
+  if (adAlt && adAlt.lat != null && adAlt.lon != null && !(dest.i && dest.i === adAlt.i)) {
+    const lw = winds[winds.length - 1];
+    const pa = RUTA.plan([dest, { lat: adAlt.lat, lon: adAlt.lon }], { tas: prm.tas, gph: prm.gph, climb: { min: 0, gal: 0, nm: 0 }, taxi: 0, resMin: 0, vari, winds: [lw ? { dir: lw.dir, spd: lw.spd } : null] });
+    if (pa.ok) alt = { ad: adAlt, nm: pa.nm, min: pa.min, gal: pa.galCruise, leg: pa.legs[0] };
+  }
+  const galAlt = alt ? alt.gal : 0, total = pl.galTotal + galAlt, cap = LIM.fuelMax, have = num('f_gal') * ff, burn = prm.gph;
+  const over = total > cap + 1e-9, short = have + 1e-9 < total;
+  const landGal = have - prm.taxi - pl.galEnroute;                     // combustible al aterrizar en el destino
+  const cNm = pl.legs.reduce((s, l) => s + (l.climbNm || 0), 0), cMin = pl.legs.reduce((s, l) => s + (l.climbMin || 0), 0);
+  const gsAvg = pl.nm - cNm > 0 && pl.min - cMin > 0 ? (pl.nm - cNm) / ((pl.min - cMin) / 60) : prm.tas;
+  const reachWith = gal => { const av = gal - prm.taxi - pl.galReserve - galAlt; return av <= pl.galClimb ? 0 : cNm + (av - pl.galClimb) / burn * gsAvg; };
+  // avisos sobre el viento usado
+  const have_w = winds.filter(Boolean), notes = [];
+  if (!have_w.length) notes.push('Sin datos de viento: el cálculo supone aire en calma. Obtén el viento en el paso 3.');
+  else if (have_w.length < winds.length) notes.push('Falta el viento de algún tramo: ahí se supuso aire en calma (paso 3).');
+  if (have_w.some(w => w.stale)) notes.push('Parte del viento viene de un pronóstico viejo o de otra hora o altitud: actualízalo en el paso 3.');
+  TRIP = { pts, prm, pl, winds, alt, galAlt, total, have, cap, over, short, landGal, landMin: burn > 0 ? Math.max(0, landGal) / burn * 60 : 0, reach: reachWith(have), reachFull: reachWith(cap), notes, flightMin: pl.min + (alt ? alt.min : 0) };
+  enrouteFuel = pl.galEnroute;
+  renderCarga();
+}
+
+function renderCarga() {
+  const V = $('fuel_verdict'), T = TRIP;
+  V.replaceChildren(); $('fuel_tbl').replaceChildren(); $('fuel_out').replaceChildren(); $('fuel_note').textContent = '';
+  $('fuel_apply').disabled = true;
+  const verdict = (cls, title, text) => { const d = mk('div', null, 'verdict ' + cls); d.append(mk('b', title), mk('span', text)); V.append(d); return d; };
+  if (!T || T.none) { verdict('warn', 'Todavía no hay ruta', 'Arma la ruta en el paso 2 y aquí verás si el combustible alcanza.'); return; }
+  if (T.err) { verdict('bad', 'No se puede calcular', T.err); return; }
+  const { prm, pl, alt } = T, resMin = prm.resMin;
+  if (T.over) verdict('bad', 'No llegas sin escala', `La ruta pide ${dF(T.total)} y los tanques rinden ${dF(T.cap, 0)}. Con tanques llenos y ${fmt(resMin)} min de reserva alcanzas unas ${fmt(T.reachFull)} NM. Haz escala, baja las RPM o acepta menos reserva.`);
+  else if (T.short) verdict('bad', 'El combustible NO alcanza', `Cargaste ${dF(T.have)} y necesitas ${dF(T.total)}: faltan ${diffF(T.total - T.have)}. Con lo cargado llegas hasta unas ${fmt(T.reach)} NM sin tocar la reserva. Usa «Cargar el combustible necesario».`);
+  else verdict('ok', 'El combustible alcanza', `Cargaste ${dF(T.have)} y necesitas ${dF(T.total)}. Aterrizas con ${dF(T.landGal)} (${hm(T.landMin / 60)} de vuelo): ${dF(T.have - T.total)} sobre la reserva de ${fmt(resMin)} min${alt ? ' y el alterno' : ''}.`);
+  T.notes.forEach(n => V.append(mk('div', n, 'msg warn')));
+  pl.warns.forEach(w => V.append(mk('div', w, 'msg warn')));
+  $('fuel_apply').disabled = T.over;
+
+  const bad = T.over || T.short;
+  $('fuel_out').innerHTML =
+    kpi('Necesitas', dF(T.total), bad ? 'bad' : 'ok') + kpi('Cargado', dF(T.have), bad ? 'bad' : '') +
+    kpi('Aterrizas con', dF(Math.max(0, T.landGal)), T.landGal < pl.galReserve ? 'bad' : '') +
+    kpi('Tiempo de vuelo', hm(T.flightMin / 60)) + kpi('Distancia', fmt(pl.nm) + ' NM') +
+    kpi(`Alcance con ${dF(T.have, 0)} y reserva`, fmt(T.reach) + ' NM', T.short ? 'bad' : '');
+
+  // tabla por tramo: lo que queda en el tanque después de cada fase
+  let left = T.have;
+  const rows = [], row = (a, sub, t, g) => {
+    left -= g;
+    const tr = mk('tr'), td = mk('td', a); if (sub) td.append(mk('small', sub));
+    const lc = left < -1e-9 ? 'neg' : '';
+    tr.append(td, mk('td', t), mk('td', dF(g)), mk('td', (left < -1e-9 ? '−' : '') + dF(Math.abs(left)), lc)); rows.push(tr);
+  };
+  row('Rodaje + despegue', '', '—', prm.taxi);
+  pl.legs.forEach((l, i) => row(`${i + 1}. ${ptLabel(T.pts[i], i)} → ${ptLabel(T.pts[i + 1], i + 1)}`,
+    `${l.wspd > 0 ? `viento ${String(Math.round(l.wdir) % 360).padStart(3, '0')}° ${fmt(l.wspd)} kt` : 'sin viento'} · suelo ${fmt(l.gs)} kt${l.climbNm > 0 ? ' · con ascenso' : ''}`, mm(l.min), l.gal));
+  if (alt) row(`Alterno ${alt.ad.i}`, `${fmt(alt.nm)} NM a la misma altitud`, mm(alt.min), alt.gal);
+  row('Reserva', `${fmt(resMin)} min a consumo de crucero`, mm(resMin), pl.galReserve);
+  const tb = mk('tbody'); rows.forEach(r => tb.append(r));
+  const th = mk('thead'), hr = mk('tr'); ['Fase', 'Tiempo', 'Comb.', 'Queda'].forEach(t => hr.append(mk('th', t))); th.append(hr);
+  const tf = mk('tfoot'), fr = mk('tr'); fr.append(mk('td', 'Total'), mk('td', hm(T.flightMin / 60)), mk('td', dF(T.total)), mk('td', '')); tf.append(fr);
+  $('fuel_tbl').append(th, tb, tf);
+  $('fuel_note').textContent = (prm.poh
+    ? `Ascenso (Fig. 5-7) y crucero (Fig. 5-8) del POH, mezcla pobre, a ${dW(MODEL.cruise.w)} (el POH no corrige por peso: con menos peso rendirá algo mejor)${prm.extra ? `, con +${fmt(prm.extra)} % de consumo` : ''}. `
+    : 'Velocidad y consumo son los que ingresaste en el paso 1; el combustible de ascenso se suma una vez. ') +
+    'Cada tramo usa su propio viento. No se modela el descenso: se calcula crucero hasta el destino (del lado conservador). La distancia es en línea recta entre los puntos de la ruta. Valores de avión nuevo: uno con horas consume algo más, para eso está la reserva.';
+}
+
+// ---------- Estado del vuelo (barra de arriba) ----------
+function setPill(id, cls, text) { const b = $(id); b.querySelector('.dot').className = 'dot ' + cls; b.querySelector('small').textContent = text; }
+function renderStatus(valid = true) {
+  const pts = routePts();
+  $('chip').textContent = pts.length ? `${ptLabel(pts[0], 0)} → ${pts.length > 1 ? ptLabel(pts[pts.length - 1], pts.length - 1) : '····'}${pts.length > 2 ? ` (+${pts.length - 2})` : ''}` : 'Sin ruta';
+  $('seg_dep').textContent = pts.length && pts[0].i ? pts[0].i : '';
+  $('seg_arr').textContent = pts.length > 1 && pts[pts.length - 1].i ? pts[pts.length - 1].i : '';
+  $('model_specs').textContent = `MTOW ${dW(LIM.mtow)} · ${dF(LIM.fuelMax, 0)} utilizables · Fuente: ${MODEL.poh}`;
+  if (!valid) { ['st_fuel', 'st_wb', 'st_rwy'].forEach(id => setPill(id, 'warn', 'Revisa los datos')); return; }
+  const T = TRIP;
+  if (!T || T.none) setPill('st_fuel', 'off', 'Sin ruta');
+  else if (T.err) setPill('st_fuel', 'bad', 'No se calcula');
+  else if (T.over) setPill('st_fuel', 'bad', 'No llegas');
+  else if (T.short) setPill('st_fuel', 'bad', `Faltan ${diffF(T.total - T.have)}`);
+  else setPill('st_fuel', 'ok', `Sobran ${dF(T.have - T.total)}`);
+  const w = SUM.wb;
+  if (!w) setPill('st_wb', 'off', '—'); else setPill('st_wb', w.ok ? 'ok' : 'bad', w.ok ? 'Dentro de límites' : 'Fuera de límites');
+  const pr = [SUM.to, SUM.ld].filter(Boolean);
+  if (!pr.length || !routePts().length) setPill('st_rwy', 'off', routePts().length ? '—' : 'Sin ruta');   // sin ruta no hay aeródromos: «cabes» sería un dato sin respaldo
+  else {
+    const rank = { ok: 0, warn: 1, bad: 2 }, worst = pr.reduce((a, b) => (rank[b.ok] > rank[a.ok] ? b : a)), cls = worst.ok;
+    setPill('st_rwy', cls, cls === 'ok' ? 'Cabes' : cls === 'warn' ? 'Sin margen' : worst === SUM.to ? 'No cabe (salida)' : 'No cabe (llegada)');
+  }
+}
+
+// ---------- Puente para los demás módulos (mapa.js, viaje.js, pvo.js, aerodromos.js) ----------
+function loadFuel(gal) {
+  // se redondea hacia arriba al 0,1 de la unidad elegida, sin pasar del tanque
+  const cap = Math.floor(LIM.fuelMax / ff * 10 + 1e-9) / 10;
+  $('f_gal').value = Math.min(cap, +(Math.ceil(gal / ff * 10 - 1e-9) / 10).toFixed(1));
+  recalc();
+}
+// Pronóstico de superficie → campos de condiciones de la salida o de la llegada. El viento del pronóstico es verdadero: se pasa a magnético.
+function setMet(which, m) {
+  const ids = which === 'dep' ? ['wdir', 'wspd', 'oat', 'qnh'] : ['a_wdir', 'a_wspd', 'a_oat', 'a_qnh'], vari = num('ru_var');
+  if (m.dir != null && m.spd != null) { $(ids[0]).value = (Math.round(m.dir - vari) % 360 + 360) % 360; $(ids[1]).value = Math.round(m.spd); }
+  if (m.tmp != null) $(ids[2]).value = Math.round(m.tmp);
+  if (m.qnh != null) $(ids[3]).value = Math.round(m.qnh);
+  recalc();
 }
 window.APP = {
-  go: t => go(t), recalc: () => recalc(), params: routeParams,
-  fmt, hm, mm, dF, uf: () => (uf() === 'L' ? 'L' : 'gal'),
-  // combustible de la ruta (con reserva y rodaje) a Peso y balance: se redondea hacia arriba, sin pasar del tanque
-  applyFuel(gal) {
-    const cap = Math.floor(LIM.fuelMax / ff * 10 + 1e-9) / 10;
-    $('f_gal').value = Math.min(cap, +(Math.ceil(gal / ff * 10 - 1e-9) / 10).toFixed(1));
-    recalc(); go('wb');
-  },
-  tankCap: () => LIM.fuelMax,
-  have: () => num('f_gal') * ff,
-  // distancia y viento de frente medio de la ruta al planificador de un solo tramo de Combustible
-  legacy(nm, head) { $('r_dist').value = Math.ceil(nm); $('r_wind').value = Math.round(head); recalc(); },
-  altitude: () => num('r_alt'),
+  go: t => go(t), recalc: () => recalc(), params: tripParams, trip: () => TRIP, wb: () => WB, sum: () => SUM,
+  fmt, hm, mm, dF, dW, mk, uf: unitF, uw: () => uw(), ff: () => ff, wf: () => wf, num, ptLabel,
+  loadFuel, setMet, tankCap: () => LIM.fuelMax, have: () => num('f_gal') * ff, altitude: () => num('r_alt'),
+  model: () => MODEL, atmosphere, variation: () => num('ru_var'), wbState, inEnvelope,
 };
-
-// ---------- Inicio: vuelo y resumen ----------
-function setRow(id, cls, title, text) {
-  const r = $(id);
-  r.querySelector('.dot').className = 'dot ' + cls;
-  r.querySelector('b').textContent = title;
-  r.querySelector('small').textContent = text;
-}
-const fitText = o => o.out ? o.out : o.ok === 'ok' ? (o.mp > 0 ? `Con margen del ${fmt(o.mp)} %: ${fmt(o.need)} ft de ${fmt(o.len)} ft disponibles` : `Cabe según el POH: ${fmt(o.need)} ft de ${fmt(o.len)} ft disponibles`)
-  : o.ok === 'warn' ? `Sin el margen del ${fmt(o.mp)} %: pide ${fmt(o.need)} ft, hay ${fmt(o.len)} ft`
-  : `No cabe: pide ${fmt(o.need)} ft, hay ${fmt(o.len)} ft`;
-
-// valid = false: el boleto de vuelo se sigue actualizando, pero el resumen avisa que faltan datos
-function renderHome(valid = true) {
-  const A = window.AD;
-  const f = A ? A.get($('fl_from').value) : null, t = A ? A.get($('fl_to').value) : null;
-  $('tk_from').textContent = f ? f.i : '----';
-  $('tk_from_n').textContent = f ? f.n : 'Sin elegir';
-  $('tk_to').textContent = t ? t.i : '----';
-  $('tk_to_n').textContent = t ? t.n : 'Sin elegir';
-  $('seg_dep').textContent = f ? f.i : '';
-  $('seg_arr').textContent = t ? t.i : '';
-  $('chip').textContent = f || t ? `${f ? f.i : '····'} → ${t ? t.i : '····'}` : 'Sin vuelo';
-
-  const rt = f && t ? A.route(f, t) : null;
-  $('tk_dist').textContent = rt ? fmt(rt.nm) + ' NM' : '';
-  const noPos = f && t ? [f, t].filter(a => a.lat == null || a.lon == null).map(a => a.i).join(' y ') : '';
-  $('tk_meta').textContent = rt
-    ? `En línea recta · rumbo verdadero ${String(Math.round(rt.brg) % 360).padStart(3, '0')}°` + (PLAN ? ` · ETE ${hm(PLAN.ete(rt.nm))} a ${fmt(PLAN.gs)} kt de velocidad suelo` : '')
-    : (f && t ? `⚠ Falta la posición de ${noPos}: no se puede calcular la distancia.` : 'Elige origen y destino para ver distancia, rumbo y tiempo.');
-  // Caja de ruta en Combustible: avisa si la distancia usada no es la de la ruta, o si no hay coordenadas (nunca usar una distancia antigua en silencio)
-  const box = $('fuel_route');
-  box.hidden = !(f && t);
-  box.classList.toggle('warnbox', !!(f && t) && (!rt || Math.ceil(rt.nm) !== num('r_dist')));
-  if (f && t) {
-    const used = num('r_dist'), same = rt && Math.ceil(rt.nm) === used;
-    $('fuel_route_txt').textContent = !rt ? `⚠ Falta la posición de ${noPos}: no se pudo calcular la distancia ${f.i} → ${t.i}. Ingrésala a mano.`
-      : same ? `✔ ${f.i} → ${t.i}: ${fmt(rt.nm)} NM en línea recta (la que usa el planificador)`
-      : `${f.i} → ${t.i}: ${fmt(rt.nm)} NM en línea recta. ⚠ El planificador usa ${fmt(used)} NM.`;
-    $('fuel_route_apply').hidden = !rt || same;
-  }
-
-  $('model_specs').textContent = `MTOW ${dW(LIM.mtow)} · ${dF(LIM.fuelMax, 0)} utilizables · Fuente: ${MODEL.poh}`;
-
-  if (!valid) {
-    setRow('sum_wb', 'warn', 'Peso y balance', invalidMsg);
-    [['sum_to', 'Despegue'], ['sum_ld', 'Aterrizaje'], ['sum_fuel', 'Combustible']]
-      .forEach(([id, title]) => setRow(id, 'warn', title, 'Resultado suspendido hasta corregir los datos.'));
-    return;
-  }
-  const w = SUM.wb;
-  if (w) setRow('sum_wb', w.ok ? 'ok' : 'bad', 'Peso y balance',
-    w.ok ? `Dentro de límites · despegue ${dW(w.tow)} · margen ${dW(w.margin)}`
-      : w.issues[0] + (w.issues.length > 1 ? ` (y ${w.issues.length - 1} más)` : ''));
-  if (SUM.to) setRow('sum_to', SUM.to.ok, 'Despegue' + (f ? ' · ' + f.i : ''), fitText(SUM.to));
-  if (SUM.ld) setRow('sum_ld', SUM.ld.ok, 'Aterrizaje' + (t ? ' · ' + t.i : ''), fitText(SUM.ld));
-  const fu = SUM.fuel;
-  if (fu && fu.err) setRow('sum_fuel', 'bad', 'Combustible', fu.err);
-  else if (fu) {
-    // 1e-9: tolerancia de coma flotante (p. ej. litros convertidos de ida y vuelta)
-    const short = fu.have + 1e-9 < fu.need;
-    const cls = fu.need > fu.max || short ? 'bad' : 'ok';
-    setRow('sum_fuel', cls, 'Combustible',
-      fu.need > fu.max ? `La ruta pide ${dF(fu.need)} y el tanque rinde ${dF(fu.max, 0)}`
-        : short ? `Cargado ${dF(fu.have)}, necesitas ${dF(fu.need)}`
-        : `Cargado ${dF(fu.have)} · necesitas ${dF(fu.need)} con reserva`);
-  }
-}
 
 // ---------- Modelo: selector y vistas de solo lectura ----------
 // Todo sale de MODELS (modelos.js), transcrito del POH de cada modelo. No hay datos inventados en la app.
@@ -646,6 +631,10 @@ const MODEL_ORDER = ['c172s', 'c172r', 'c172p', 'c172n', 'c172m'];
 const lbkg = lb => `${fmt(lb)} lb (${fmt(lb * KG_PER_LB)} kg)`;
 const tbl = rows => `<table class="grid ro"><tbody>${rows.filter(r => r[1] != null && r[1] !== '')
   .map(r => `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('')}</tbody></table>`;
+
+function fillModelSelect() {
+  $('fl_model').innerHTML = MODEL_ORDER.filter(k => MODELS[k]).map(k => `<option value="${k}">${MODELS[k].nombre} · ${MODELS[k].sub}</option>`).join('');
+}
 
 // Cambia de modelo. reset = true precarga los ejemplos del POH (peso vacío, brazo y cargas típicas).
 function setModel(id, reset, tankId) {
@@ -661,8 +650,6 @@ function setModel(id, reset, tankId) {
     const w = lb => +(lb / wf).toFixed(wf === 1 ? 0 : 1), g = gal => +(gal / ff).toFixed(ff === 1 ? 0 : 1);
     $('w_empty').value = w(MODEL.empty.w);
     $('a_empty').value = MODEL.empty.arm;
-    $('to_w').value = w(Math.round(MODEL.w.mtow * 0.94 / 10) * 10);
-    $('ld_w').value = w(Math.round(MODEL.w.mtow * 0.86 / 10) * 10);
     $('f_gal').value = g(Math.round(LIM.fuelMax * 0.75));
     $('r_taxi').value = +(MODEL.climb.allow / ff).toFixed(1);   // rodaje y despegue: el valor del POH del modelo
     $('r_rpm').value = defaultRpm(MODEL);
@@ -672,13 +659,6 @@ function setModel(id, reset, tankId) {
 }
 
 function renderModelUI() {
-  $('model_list').innerHTML = MODEL_ORDER.filter(k => MODELS[k]).map(k => {
-    const m = MODELS[k], on = m === MODEL;
-    return `<button type="button" class="model${on ? ' on' : ''}" role="radio" aria-checked="${on}" data-model="${k}">
-      <span class="mico"><svg class="ic" aria-hidden="true"><use href="#i-plane"/></svg></span>
-      <span class="mtxt"><b>${m.nombre}</b><small>${m.sub}</small></span>
-      <span class="check" aria-hidden="true">✔</span></button>`;
-  }).join('') + '<div class="model soon"><span>Más modelos (K, L, Q…) próximamente, a medida que se carguen sus POH</span></div>';
   $('taxi_poh').textContent = `El POH del ${MODEL.nombre.replace('Cessna ', '').replace(' Skyhawk', '')} indica ${fmt(MODEL.climb.allow, 1)} gal (${fmt(MODEL.climb.allow * L_PER_GAL, 1)} L) para arranque, rodaje y despegue. Súmale rodaje largo o espera en cabecera.`;
   $('empty_note').textContent = `Peso vacío y brazo precargados con el ejemplo del POH (${MODEL.empty.nota.replace(/^Ejemplo del POH: /, '')}). Reemplázalos por los de la hoja de peso y balance de tu matrícula.`;
 }
@@ -776,19 +756,19 @@ function go(tab, open) {
   if (open) showSub(tab + '_' + open);
   window.scrollTo(0, 0);
   if (tab === 'ruta' && window.MAPA) window.MAPA.shown();   // Leaflet necesita medir el mapa ya visible
+  document.dispatchEvent(new CustomEvent('c172:tab', { detail: tab }));
 }
 
-// ---------- Eventos ----------
 // ---------- Validación ----------
 // Si falta un dato o es imposible, se suspenden los resultados: es mejor no mostrar nada que un número falso.
-const SIGNED = ['elev', 'a_elev', 'oat', 'a_oat', 'r_wind', 'r_isa', 'ru_var'];             // pueden ser negativos
-const POSITIVE = ['w_empty', 'to_w', 'ld_w', 'qnh', 'a_qnh', 'r_tas', 'r_burn', 'to_len', 'ld_len', 'r_alt', 'r_rpm'];
-// En blanco valen 0 (p. ej. "sin pasajeros atrás"); la pista y la dirección del viento solo importan si hay viento
-const BLANK_OK = ['w_front', 'w_rear', 'w_bagA', 'w_bagB', 'f_gal', 'wspd', 'a_wspd', 'r_dist', 'r_taxi', 'r_climb', 'ru_wdir', 'ru_wspd', 'ru_var'];
+const SIGNED = ['elev', 'a_elev', 'oat', 'a_oat', 'r_isa', 'ru_var'];                       // pueden ser negativos
+const POSITIVE = ['w_empty', 'qnh', 'a_qnh', 'r_tas', 'r_burn', 'to_len', 'ld_len', 'r_alt', 'r_rpm'];
+// En blanco valen 0 (p. ej. «sin pasajeros atrás»); la pista y la dirección del viento solo importan si hay viento
+const BLANK_OK = ['w_front', 'w_rear', 'w_bagA', 'w_bagB', 'f_gal', 'wspd', 'a_wspd', 'r_taxi', 'r_climb', 'ru_var'];
 const NEEDS_WIND = { rwy: 'wspd', wdir: 'wspd', a_rwy: 'a_wspd', a_wdir: 'a_wspd' };
 // Rangos físicamente razonables: atrapan errores de tipeo (p. ej. QNH 10013)
-const RANGE = { elev: [-1500, 20000], a_elev: [-1500, 20000], qnh: [850, 1100], a_qnh: [850, 1100], oat: [-60, 60], a_oat: [-60, 60], wspd: [0, 150], a_wspd: [0, 150], r_tas: [30, 300], r_wind: [-150, 150], r_alt: [0, 30000], r_rpm: [500, 3500], r_isa: [-60, 60], ru_wdir: [0, 360], ru_wspd: [0, 150], ru_var: [-30, 30] };
-const DEP_IDS = ['elev', 'qnh', 'oat', 'rwy', 'wdir', 'wspd', 'to_w', 'to_len'], ARR_IDS = ['a_elev', 'a_qnh', 'a_oat', 'a_rwy', 'a_wdir', 'a_wspd', 'ld_w', 'ld_len'];
+const RANGE = { elev: [-1500, 20000], a_elev: [-1500, 20000], qnh: [850, 1100], a_qnh: [850, 1100], oat: [-60, 60], a_oat: [-60, 60], wspd: [0, 150], a_wspd: [0, 150], r_tas: [30, 300], r_alt: [0, 30000], r_rpm: [500, 3500], r_isa: [-60, 60], ru_var: [-30, 30] };
+const DEP_IDS = ['elev', 'qnh', 'oat', 'rwy', 'wdir', 'wspd', 'to_len'], ARR_IDS = ['a_elev', 'a_qnh', 'a_oat', 'a_rwy', 'a_wdir', 'a_wspd', 'ld_len'];
 let invalidMsg = '';
 
 function fieldName(e) {
@@ -816,90 +796,79 @@ function validateInputs() {
     e.setAttribute('aria-invalid', String(!!bad));
     if (bad) invalid.push(e);
   });
-  const routeOK = $('r_mode').value === 'poh' || num('r_tas') > num('r_wind');
-  const ok = !invalid.length && !!MODEL && routeOK;
+  const ok = !invalid.length && !!MODEL;
   if (invalid.length) {
     const n = [...new Set(invalid.map(fieldName))];
     invalidMsg = `Revisa ${n.slice(0, 3).join(', ')}${n.length > 3 ? ` y ${n.length - 3} más` : ''}: falta el valor o está fuera de rango.`;
-  } else if (!routeOK) invalidMsg = 'La velocidad suelo debe ser mayor que cero. Revisa TAS y viento en Combustible.';
-  else invalidMsg = '';
+  } else invalidMsg = '';
   $('validation').hidden = ok;
   $('validation').textContent = ok ? '' : invalidMsg + ' Los resultados están suspendidos.';
   return ok;
 }
 
-const OUTPUT_IDS = ['wb_res', 'wb_msgs', 'chart', 'atm_out', 'a_atm_out', 'to_out', 'ld_out', 'to_fig', 'ld_fig', 'to_notes', 'ld_notes', 'fuel_out', 'fuel_msg', 'fuel_tbl'];
+const OUTPUT_IDS = ['wb_res', 'wb_msgs', 'chart', 'atm_out', 'a_atm_out', 'to_out', 'ld_out', 'to_fig', 'ld_fig', 'to_notes', 'ld_notes', 'fuel_out', 'fuel_verdict', 'fuel_tbl'];
+// Los pesos de despegue y aterrizaje para Performance salen solos de Carga: despegue = rampa − rodaje; aterrizaje = despegue − combustible de la ruta
+function setPerfWeights() {
+  const to = Math.round(TOW / wf), ld = Math.round(Math.max(0, TOW - enrouteFuel * LIM.lbPerGal) / wf);
+  $('to_w').value = to; $('ld_w').value = ld;
+  $('to_wtxt').textContent = `Peso de despegue ${dW(TOW)}, con el combustible y la carga del paso 4.`;
+  $('ld_wtxt').textContent = enrouteFuel > 0
+    ? `Peso de aterrizaje ${dW(TOW - enrouteFuel * LIM.lbPerGal)}: el de despegue menos el combustible que quemas en la ruta (${dF(enrouteFuel)}).`
+    : `Peso de aterrizaje ${dW(TOW)}: sin ruta no se descuenta combustible (del lado conservador).`;
+}
 function recalc() {
   save();
   syncMode();
   readModel();
   const ok = validateInputs();
-  document.querySelectorAll('[data-copy]').forEach(b => { b.disabled = !ok; });
   if (!ok) {
     OUTPUT_IDS.forEach(id => $(id).replaceChildren());
     $('fuel_apply').disabled = true;
     Object.keys(SUM).forEach(k => { SUM[k] = null; });
     $('fuel_note').textContent = '';
-    TOW = fuelNeeded = enrouteFuel = 0; PLAN = null;
-    renderHome(false);
+    TOW = enrouteFuel = 0; TRIP = null; WB = null;
+    renderStatus(false);
+    document.dispatchEvent(new CustomEvent('c172:calc', { detail: { ok: false } }));
     return;
   }
-  calcWB(); calcPerf(); calcFuel(); renderHome();
-  if (window.MAPA && window.MAPA.refresh) window.MAPA.refresh();
+  calcWB(); calcTrip(); setPerfWeights(); calcPerf(); renderStatus();
+  document.dispatchEvent(new CustomEvent('c172:calc', { detail: { ok: true } }));
 }
 
+// ---------- Eventos ----------
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-go],[data-tab]');
-  if (b) go(b.dataset.go || b.dataset.tab, b.dataset.open);
+  if (!b) return;
+  if (b.dataset.ad && window.AD && window.AD.showInfo) window.AD.showInfo(b.dataset.ad);
+  go(b.dataset.go || b.dataset.tab, b.dataset.open);
 });
 document.querySelectorAll('.seg').forEach(seg => seg.addEventListener('click', e => {
   const b = e.target.closest('button[data-sub]');
   if (b) showSub(b.dataset.sub);
 }));
-document.querySelectorAll(FIELDS).forEach(e => { if (e.id !== 'u_w' && e.id !== 'u_f') e.addEventListener('input', recalc); });
+document.querySelectorAll(FIELDS).forEach(e => { if (!['u_w', 'u_f', 'fl_model'].includes(e.id)) e.addEventListener('input', recalc); });
 $('u_w').addEventListener('change', onUnitChange);
 $('u_f').addEventListener('change', onUnitChange);
-$('model_list').addEventListener('click', e => {
-  const b = e.target.closest('[data-model]');
-  if (!b || b.dataset.model === MODEL.id) return;
-  setModel(b.dataset.model, true);
-  recalc();
-});
+$('fl_model').addEventListener('change', () => { setModel($('fl_model').value, true); recalc(); });
 $('m_tank').addEventListener('change', () => {
   readModel();
   // si cambió a un tanque más chico, el combustible cargado no puede quedar sobre su capacidad
   if (num('f_gal') * ff > LIM.fuelMax) $('f_gal').value = +(LIM.fuelMax / ff).toFixed(1);
   recalc();
 });
-document.querySelector('[data-copy="to"]').addEventListener('click', () => { $('to_w').value = Math.round(TOW / wf); recalc(); });
-// Peso de aterrizaje = peso de despegue menos el combustible de la ruta (ruta + ascenso extra)
-document.querySelector('[data-copy="ld"]').addEventListener('click', () => {
-  $('ld_w').value = Math.round(Math.max(0, TOW - enrouteFuel * LIM.lbPerGal) / wf);
-  recalc();
-});
-$('fuel_apply').addEventListener('click', () => {
-  // fuelNeeded ya incluye el rodaje; se redondea hacia arriba al 0,1 de la unidad elegida, sin pasar del tanque
-  const cap = Math.floor(LIM.fuelMax / ff * 10 + 1e-9) / 10;
-  $('f_gal').value = Math.min(cap, +(Math.ceil(fuelNeeded / ff * 10 - 1e-9) / 10).toFixed(1));
-  recalc();
-  go('wb');
-});
-$('fuel_route_apply').addEventListener('click', () => {
-  const A = window.AD, rt = A && A.route(A.get($('fl_from').value), A.get($('fl_to').value));
-  if (rt) { $('r_dist').value = Math.ceil(rt.nm); recalc(); }
-});
-$('go_plan').addEventListener('click', () => go('wb'));
+$('fuel_apply').addEventListener('click', () => { if (TRIP && TRIP.total) loadFuel(TRIP.total); });
 
 // Accesibilidad: cada campo de las tablas toma el nombre de su fila; los segmentos indican cuál está activo
 document.querySelectorAll('.grid input').forEach(e => {
   const row = e.closest('tr');
-  if (row && row.cells[0]) e.setAttribute('aria-label', row.cells[0].textContent.replace(/\s+/g, ' ').trim() + (e.id === 'a_empty' ? ' · brazo (in)' : ''));
+  if (row && row.cells[0]) e.setAttribute('aria-label', row.cells[0].textContent.replace(/\s+/g, ' ').trim());
 });
 document.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-selected', String(b.classList.contains('on'))));
 
+fillModelSelect();
 const saved = load();
 curW = uw(); curF = uf();
 readUnits();
 // Primera vez (o si no había modelo guardado): se precargan los ejemplos del POH. Si no, se respetan los datos guardados.
-setModel($('fl_model').value || 'c172s', !saved.fl_model, saved.m_tank);
+setModel(saved.fl_model || 'c172s', !saved.fl_model, saved.m_tank);
 recalc();

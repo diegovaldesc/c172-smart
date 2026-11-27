@@ -40,7 +40,6 @@
   let CAN = { items: [], labels: [] }, RV = { puntos: {}, rutas: [] };
   let map = null, ESP = [], adReady = false, route = [], cfg = store.get(LS_MAP, { layers: {}, base: 'osm' });
   let baseLayer = null, groupLayers = {}, adMarkers = [], routeLine = null, routeHalo = null, ptMarkers = [], legMarkers = [], tapPopup = null, fitted = false;
-  let lastPlan = null, syncing = false;
 
   // ---------- ruta ----------
   const label = (p, i) => p.i || p.w || ('P' + (i + 1));          // i = aeródromo; w = punto geográfico publicado en el AIP (ENR 7.7)
@@ -56,21 +55,19 @@
   }
   const saveRoute = () => store.set(LS_ROUTE, route);
 
-  // Cada cambio hecho por el usuario: guarda, repinta, y deja origen/destino de Inicio y la distancia de Combustible acordes a la ruta
+  // Cada cambio hecho por el usuario: guarda, repinta y recalcula todo (el origen y el destino de la ruta son los de Despegue y aterrizaje)
+  function syncEnds() {
+    const ad = A();
+    if (!ad || !ad.setEnds) return;
+    const f = route[0], t = route.length > 1 ? route[route.length - 1] : null;
+    ad.setEnds(f && f.i ? f.i : '', t && t.i ? t.i : '');     // '' = ese extremo no es un aeródromo (se limpia el panel)
+  }
   function edited() {
     saveRoute();
-    const ad = A();
-    if (ad && ad.setEnds && route.length) {
-      const f = route[0], t = route.length > 1 ? route[route.length - 1] : null;
-      syncing = true;
-      try { ad.setEnds(f.i || null, t && t.i ? t.i : null); } finally { syncing = false; }
-    }
+    syncEnds();
     renderAll();
-    if (window.APP && route.length >= 2) {
-      const dec = decide(); if (dec) window.APP.legacy(dec.nm, dec.head);
-    }
+    if (window.APP) window.APP.recalc();
   }
-  function decide() { return lastPlan && lastPlan.nm > 0 ? { nm: lastPlan.nm, head: lastPlan.nm ? lastPlan.legs.reduce((s, l) => s + (l.head || 0) * l.nm, 0) / lastPlan.nm : 0 } : null; }
   function add(p, at) {
     if (at == null || at >= route.length) route.push(p); else route.splice(at, 0, p);
     edited();
@@ -80,16 +77,6 @@
     add(ptOf(a));
     if (fly && map) map.panTo([a.lat, a.lon]);
   }
-  // Inicio cambió origen/destino: la ruta del mapa los toma (primer y último punto)
-  function homeChanged(key, a) {
-    if (syncing || !a || a.lat == null) return;
-    const p = ptOf(a);
-    if (key === 'from') { if (!route.length) route = [p]; else route[0] = p; }
-    else { if (route.length < 2) route.push(p); else route[route.length - 1] = p; }
-    saveRoute(); renderAll();
-    if (window.APP && route.length >= 2) { const dec = decide(); if (dec) window.APP.legacy(dec.nm, dec.head); }
-  }
-
   // ---------- mapa ----------
   function popupAD(a) {
     const d = h('div', null, 'rt-pop');
@@ -268,8 +255,10 @@
     if (t && t.lat != null) pts[pts.length - 1] = ptOf(t);
     if (route.length && route[route.length - 1].i && pts[0].i === route[route.length - 1].i) pts.shift();
     route.push(...pts);
-    edited(); fitRoute();
+    edited(); showRoute();
   }
+  // Desde Información: lleva a la pestaña Ruta y encuadra la ruta nueva
+  function showRoute() { if (window.APP) window.APP.go('ruta'); fitRoute(); }
   function vrcCands() {
     if (!CAN.items.length || !route.length) return [];
     const o = route[0].i, d = route.length > 1 ? route[route.length - 1].i : null;
@@ -289,10 +278,10 @@
       const view = h('button', 'Ver', 'rt-ib'), use = h('button', 'Usar', 'rt-ib rt-use');
       view.type = use.type = 'button';
       view.addEventListener('click', () => {
+        if (window.APP) window.APP.go('ruta');                       // el mapa está en la pestaña Ruta
         if (!map) return;
         cfg.layers = { ...(cfg.layers || {}), vrc: true }; store.set(LS_MAP, cfg); applyGroup('vrc');
         const ln = vrcLayers[it.id]; if (ln) { map.fitBounds(ln.getBounds(), { padding: [50, 50], maxZoom: 13 }); ln.openPopup(ln.getBounds().getCenter()); }
-        $('rt_map').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       });
       use.addEventListener('click', () => useVrc(it));
       row.append(dot, tx, view, use); box.append(row);
@@ -308,7 +297,7 @@
     if (r.tp === 'L' && route.length >= 2) route.splice(route.length - 1, 0, ...pts);
     else if (r.tp === 'S' && route.length >= 1) route.splice(1, 0, ...pts);
     else route.push(...pts);
-    edited(); fitRoute();
+    edited(); showRoute();
   }
   function rvItem(r, sug, to) {
     const d = h('details', null, 'rt-rvi' + (sug ? ' sug' : '')); d.open = !!sug;
@@ -415,77 +404,51 @@
     });
     $('rt_empty').hidden = route.length > 0;
   }
-  const kpi = (lab, val, cls) => { const d = h('div', null, 'kpi ' + (cls || '')); d.append(h('b', val), h('span', lab)); return d; };
-  function row(cells, tag) {
-    const tr = h('tr');
-    cells.forEach(c => { const td = h(tag || 'td'); if (Array.isArray(c)) { td.append(h('span', c[0])); td.append(h('small', c[1])); } else td.textContent = c; tr.append(td); });
-    return tr;
-  }
-
-  function renderPlan() {
-    const ok2 = route.length >= 2;
-    $('rt_plan').hidden = !ok2;
-    if (!ok2) { lastPlan = null; return; }
-    const APP = window.APP, prm = APP.params();
-    const msg = $('rt_msg'); msg.replaceChildren();
-    $('rt_tbl').replaceChildren(); $('rt_kpis').replaceChildren(); $('rt_air').replaceChildren();
-    $('rt_to_wb').disabled = true; $('rt_to_fuel').disabled = true;
-    if (prm.err) {
-      lastPlan = null;
-      const m = h('div', prm.err, 'msg bad'); msg.append(m);
-      $('rt_cruise').textContent = 'Revisa los datos de crucero en la pestaña Combustible.';
-      return;
+  // ---------- resumen de la ruta y avisos ----------
+  // Espacios que cruza la ruta: es un cálculo pesado, así que se guarda mientras no cambien ruta, altitud ni datos
+  let airCache = { key: '', val: null };
+  function airAnalysis() {
+    const alt = window.APP ? window.APP.altitude() : 0;
+    const key = JSON.stringify(route) + '|' + alt + '|' + ESP.length;
+    if (airCache.key === key) return airCache.val;
+    let val = null;
+    if (route.length >= 2 && ESP.length) {
+      const cx = R.crossings(route, ESP), byId = new Map(ESP.map(e => [e.id, e])), rel = e => R.altRelation(e, alt), crit = [];
+      cx.forEach(list => list.forEach(c => { const e = byId.get(c.id); if (['P', 'R', 'D'].includes(e.tp) && rel(e) !== 'below' && rel(e) !== 'above') crit.push(e); }));
+      val = { cx, byId, rel, alt, critU: [...new Map(crit.map(e => [e.id, e])).values()] };
     }
-    $('rt_cruise').textContent = prm.info + ' (se cambia en Combustible).';
-    const pl = R.plan(route, { tas: prm.tas, gph: prm.gph, climb: prm.climb, taxi: prm.taxi, resMin: prm.resMin, wdir: num('ru_wdir'), wspd: num('ru_wspd'), vari: num('ru_var') });
-    lastPlan = pl;
-    if (!pl.ok) { msg.append(h('div', 'El viento de costado iguala o supera la velocidad verdadera en algún tramo: no hay avance. Revisa el viento.', 'msg bad')); return; }
-    pl.warns.forEach(w => msg.append(h('div', w, 'msg warn')));
-    const have = APP.have(), cap = APP.tankCap(), tot = pl.galTotal;
-    const over = tot > cap, short = have + 1e-9 < tot;
-    msg.prepend(h('div', over ? `No llegas sin escala: la ruta pide ${APP.dF(tot)} y los tanques rinden ${APP.dF(cap, 0)}. Divide la ruta o baja la reserva.`
-      : short ? `El combustible cargado (${APP.dF(have)}) no alcanza: necesitas ${APP.dF(tot)} con reserva. Usa el botón de abajo para cargarlo.`
-        : `Alcanza: con ${APP.dF(have)} cargados te sobran ${APP.dF(have - tot)} sobre la reserva de ${nf(prm.resMin)} min.`, 'msg ' + (over || short ? 'bad' : 'ok')));
+    airCache = { key, val };
+    return val;
+  }
+  const critText = a => a.critU.length
+    ? `Tu ruta cruza ${a.critU.length === 1 ? 'una zona' : a.critU.length + ' zonas'} prohibida, restringida o peligrosa a tu altitud de crucero (${nf(a.alt)} ft) o con límites que debes revisar: ${a.critU.map(e => e.nm).join('; ')}.`
+    : `Sin zonas prohibidas, restringidas ni peligrosas en el trazo a ${nf(a.alt)} ft (comparado con los límites publicados). Revisa igualmente NOTAM y el AIP vigente.`;
+  const critCls = a => 'msg ' + (a.critU.some(e => e.tp === 'P') ? 'bad' : a.critU.length ? 'warn' : 'ok');
 
-    const tbl = $('rt_tbl');
-    const th = h('thead'); th.append(row(['Tramo', 'Rumbo mag.', 'Dist.', 'Tiempo', 'Comb.'], 'th')); tbl.append(th);
-    const tb = h('tbody');
-    pl.legs.forEach((l, i) => {
-      const a = label(route[i], i), b = label(route[i + 1], i + 1);
-      tb.append(row([[`${i + 1}. ${a} → ${b}`, `Ruta ${pad3(l.tc)}° V · suelo ${nf(l.gs)} kt${l.wca && Math.abs(l.wca) >= 0.5 ? ' · corrección ' + nf(l.wca, 0) + '°' : ''}`], pad3(l.mh) + '°', nf(l.nm, l.nm < 10 ? 1 : 0) + ' NM', APP.mm(l.min), APP.dF(l.gal)]));
-    });
-    tbl.append(tb);
-    const tf = h('tfoot');
-    tf.append(row(['Ruta', '', nf(pl.nm) + ' NM', APP.hm(pl.min / 60), APP.dF(pl.galEnroute)]));
-    tf.append(row([['Rodaje + reserva', `${nf(prm.resMin)} min de reserva a consumo de crucero`], '', '', '', APP.dF(pl.galTaxi + pl.galReserve)]));
-    tf.append(row(['Total', '', nf(pl.nm) + ' NM', APP.hm(pl.min / 60), APP.dF(tot)]));
-    tbl.append(tf);
-    const k = $('rt_kpis');
-    // alcance con lo cargado: ascenso primero, luego crucero a la velocidad suelo media de la ruta, siempre con reserva
-    const cNm = pl.legs.reduce((s, l) => s + (l.climbNm || 0), 0), cMin = pl.legs.reduce((s, l) => s + (l.climbMin || 0), 0);
-    const gsAvg = pl.nm - cNm > 0 && pl.min - cMin > 0 ? (pl.nm - cNm) / ((pl.min - cMin) / 60) : prm.tas;
-    const avail = have - pl.galTaxi - pl.galReserve, reach = avail <= pl.galClimb ? 0 : cNm + (avail - pl.galClimb) / prm.gph * gsAvg;
-    k.append(kpi('Distancia', nf(pl.nm) + ' NM'), kpi('Tiempo de vuelo', APP.hm(pl.min / 60)), kpi('Combustible total', APP.dF(tot), over || short ? 'bad' : 'ok'), kpi(`Alcance con ${APP.dF(have, 0)} y reserva`, nf(reach) + ' NM'));
-    $('rt_to_wb').disabled = over; $('rt_to_fuel').disabled = false;
-    $('rt_note').textContent = 'Ascenso y crucero del POH (o tus valores) con la altitud de la pestaña Combustible, a una sola altitud y viento para toda la ruta. No incluye descenso (se calcula crucero hasta el destino, del lado conservador). La declinación y el viento los pones tú.';
-    renderAir(pl);
+  function renderSummary() {
+    const sum = $('rt_sum'), box = $('rt_alerts');
+    box.replaceChildren(); sum.replaceChildren(); sum.hidden = route.length < 2;
+    renderAir();
+    if (route.length < 2) return;
+    const APP = window.APP, nm = R.legsOf(route).reduce((s, l) => s + l.nm, 0), T = APP && APP.trip();
+    const item = (v, l) => { const d = h('div'); d.append(h('b', v), h('span', l)); return d; };
+    sum.append(item(nf(nm) + ' NM', route.length === 2 ? '1 tramo' : (route.length - 1) + ' tramos'));
+    if (T && T.pl) sum.append(item(APP.hm(T.flightMin / 60), 'de vuelo'), item(APP.dF(T.total), 'combustible con reserva'));
+    if (!ESP.length) { box.append(h('p', 'Cargando espacios aéreos…', 'hint')); return; }
+    const a = airAnalysis(); if (!a) return;
+    const m = h('div', critText(a) + ' ', critCls(a)), b = h('button', 'Ver el detalle', 'linkbtn'); b.type = 'button';
+    b.addEventListener('click', () => { if (APP) APP.go('info', 'air'); });
+    m.append(b); box.append(m);
   }
 
-  function renderAir(pl) {
+  // Detalle por tramo (Información adicional > Espacios aéreos)
+  function renderAir() {
     const box = $('rt_air'); box.replaceChildren();
+    if (route.length < 2) { box.append(h('p', 'Arma una ruta con al menos dos puntos para ver los espacios aéreos que cruza.', 'hint')); return; }
     if (!ESP.length) { box.append(h('p', 'Cargando espacios aéreos…', 'hint')); return; }
-    const alt = window.APP.altitude();
-    const cx = R.crossings(route, ESP);
-    const byId = new Map(ESP.map(e => [e.id, e]));
-    const rel = e => R.altRelation(e, alt);
-    const crit = [];
-    cx.forEach((list, i) => list.forEach(c => { const e = byId.get(c.id); if (['P', 'R', 'D'].includes(e.tp) && rel(e) !== 'below' && rel(e) !== 'above') crit.push(e); }));
-    const critU = [...new Map(crit.map(e => [e.id, e])).values()];
-    const sum = h('div', null, 'msg ' + (critU.some(e => e.tp === 'P') ? 'bad' : critU.length ? 'warn' : 'ok'));
-    sum.textContent = critU.length
-      ? `Tu ruta cruza ${critU.length === 1 ? 'una zona' : critU.length + ' zonas'} P/R/D a tu altitud de crucero (${nf(alt)} ft) o con límites que debes revisar: ${critU.map(e => e.nm).join('; ')}.`
-      : `Sin zonas prohibidas, restringidas ni peligrosas en el trazo a ${nf(alt)} ft (comparado con los límites publicados). Revisa igualmente NOTAM y el AIP vigente.`;
-    box.append(sum);
+    const a = airAnalysis(); if (!a) return;
+    const { cx, byId, rel } = a;
+    box.append(h('div', critText(a), critCls(a)));
     cx.forEach((list, i) => {
       const items = list.map(c => ({ c, e: byId.get(c.id) })).sort((x, y) => SEV.indexOf(x.e.tp) - SEV.indexOf(y.e.tp) || x.c.from - y.c.from);
       const sec = h('div', null, 'rt-air-leg');
@@ -499,10 +462,12 @@
       });
       box.append(sec);
     });
-    void pl;
   }
 
-  function renderAll() { renderList(); renderRoute(); renderVrc(); renderRv(); renderPlan(); }
+  function renderAll() {
+    renderList(); renderRoute(); renderVrc(); renderRv(); renderSummary();
+    $('rv_empty').hidden = !$('rt_vrc').hidden || !$('rt_rv').hidden;
+  }
 
   // ---------- búsqueda ----------
   function bindSearch() {
@@ -524,7 +489,10 @@
     };
     q.addEventListener('input', show);
     q.addEventListener('keydown', e => { if (e.key === 'Enter') { const f = list.querySelector('button'); if (f) f.click(); } else if (e.key === 'Escape') close(); });
-    q.addEventListener('blur', () => setTimeout(close, 180));
+    let closing = 0;   // el cierre diferido del blur no debe cerrar una lista que se reabrió al volver a escribir
+    q.addEventListener('blur', () => { closing = setTimeout(close, 180); });
+    q.addEventListener('focus', () => clearTimeout(closing));
+    q.addEventListener('input', () => clearTimeout(closing));
   }
 
   function bindUI() {
@@ -541,9 +509,6 @@
       lb.append(cb, sw, document.createTextNode(' ' + g.label)); box.append(lb);
     });
     document.querySelectorAll('input[name="rt_base"]').forEach(r => { r.checked = r.value === (cfg.base || 'osm'); r.addEventListener('change', () => { if (r.checked && map) setBase(r.value); else if (r.checked) { cfg.base = r.value; store.set(LS_MAP, cfg); } }); });
-    $('rt_to_wb').addEventListener('click', () => { if (lastPlan) window.APP.applyFuel(lastPlan.galTotal); });
-    $('rt_to_fuel').addEventListener('click', () => { const d = decide(); if (d) { window.APP.legacy(d.nm, d.head); window.APP.go('fuel'); } });
-    ['ru_wdir', 'ru_wspd', 'ru_var'].forEach(id => $(id).addEventListener('input', () => { if (route.length >= 2) renderPlan(); }));
   }
 
   // ---------- arranque ----------
@@ -552,7 +517,7 @@
       const d = window.ESP_DATA || await (await fetch('data/espacios.json')).json();
       ESP = d.esp || [];
       if (map) { drawSpaces(); Object.keys(groupLayers).forEach(applyGroup); }
-      if (route.length >= 2) renderPlan();
+      renderSummary();
     } catch (e) {
       $('rt_hint').textContent = 'No se pudieron cargar los espacios aéreos. Abre la app desde su dirección web o usa la versión de archivo único.';
     }
@@ -568,24 +533,30 @@
   function init() {
     if (typeof L === 'undefined') { $('rt_hint').textContent = 'No se pudo cargar el mapa (Leaflet).'; return; }
     loadRoute(); bindUI();
-    renderList(); renderPlan();
+    document.addEventListener('c172:calc', () => renderSummary());      // cada recálculo (combustible, altitud) actualiza el resumen y los avisos
+    renderList(); renderSummary();
     loadEsp(); loadCan(); loadRv();
     if (A()) A().whenReady(() => {
       adReady = true;
-      // sin ruta guardada, parte con el origen y destino que ya elegiste en Inicio
-      if (!route.length) {
-        const f = A().get($('fl_from').value), t = A().get($('fl_to').value);
-        route = [f, t].filter(a => a && a.lat != null).map(ptOf);
-        if (route.length) saveRoute();
-      }
       if (map) drawAerodromes();
+      syncEnds();                                   // el origen y el destino de la ruta guardada son los de Despegue y aterrizaje
       renderAll();
+      if (window.APP) window.APP.recalc();
     });
+    if (window.APP) window.APP.recalc();           // la ruta guardada ya está cargada: calcular aunque la base de aeródromos tarde o falle
   }
   window.MAPA = {
     shown() { if (typeof L === 'undefined') return; if (!map) createMap(); else { map.invalidateSize(); if (!fitted) { fitRoute(); fitted = true; } } },
-    refresh() { renderPlan(); },
-    homeChanged,
+    refresh() { renderSummary(); },
+    route: () => route,
+    labelOf: label,
+    // Para la bitácora: zonas P/R/D a la altitud de crucero y espacios controlados que cruza la ruta
+    air() {
+      const a = airAnalysis(); if (!a) return null;
+      const seen = new Map();
+      a.cx.forEach(list => list.forEach(c => { const e = a.byId.get(c.id); if (['C', 'CTR', 'ATZ', 'TMA'].includes(e.tp) && !seen.has(e.id)) seen.set(e.id, { nm: e.nm, tp: e.tp, lim: limTxt(e) }); }));
+      return { critU: a.critU, alt: a.alt, ctl: [...seen.values()].sort((x, y) => SEV.indexOf(x.tp) - SEV.indexOf(y.tp)) };
+    },
   };
   init();
 })();

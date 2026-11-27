@@ -1,12 +1,16 @@
-const CACHE = 'c172smart-v14';
-const FILES = ['./', 'index.html', 'style.css', 'app.js', 'modelos.js', 'aerodromos.js', 'ruta.js', 'mapa.js', 'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css', 'data/aerodromos.json', 'data/espacios.json', 'data/canales.json', 'data/rutas_visuales.json', 'manifest.webmanifest', 'icon.svg'];
+const CACHE = 'c172smart-v15';
+const FILES = ['./', 'index.html', 'style.css', 'app.js', 'modelos.js', 'aerodromos.js', 'ruta.js', 'viento.js', 'viaje.js', 'pvo.js', 'mapa.js', 'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css', 'data/aerodromos.json', 'data/espacios.json', 'data/canales.json', 'data/rutas_visuales.json', 'manifest.webmanifest', 'icon.svg'];
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES))));
 self.addEventListener('activate', e => e.waitUntil(
   caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))));
 // Red primero (para recibir actualizaciones); si no hay conexión, usa la copia guardada.
-self.addEventListener('fetch', e => e.respondWith(
-  fetch(e.request).then(r => {
-    const copy = r.clone();
-    caches.open(CACHE).then(c => c.put(e.request, copy));
-    return r;
-  }).catch(() => caches.match(e.request))));
+// El viento en vivo (Open-Meteo) nunca se guarda ni se sirve de la copia: un pronóstico viejo no puede pasar por reciente.
+self.addEventListener('fetch', e => {
+  if (e.request.method !== 'GET' || /(^|\.)open-meteo\.com$/.test(new URL(e.request.url).hostname)) return;
+  e.respondWith(
+    fetch(e.request).then(r => {
+      const copy = r.clone();
+      caches.open(CACHE).then(c => c.put(e.request, copy));
+      return r;
+    }).catch(() => caches.match(e.request)));
+});

@@ -4,412 +4,98 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#16222e">
-<title>C172 Smart – Performance Cessna 172</title>
+<title>C172 Smart – Planificador de vuelo Cessna 172</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg">
 <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
 <link rel="stylesheet" href="style.css">
 </head>
-<body data-view="home">
+<body data-view="plane">
 
 <!-- Iconos reutilizables -->
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11.5 12 4l9 7.5M5.5 10v10h13V10M10 20v-5.5h4V20"/></symbol>
-  <symbol id="i-scale" viewBox="0 0 24 24"><path d="M12 4v16M7 20h10M5 7h14M5 7l-3 7a3.2 3.2 0 0 0 6 0L5 7zM19 7l-3 7a3.2 3.2 0 0 0 6 0L19 7z"/></symbol>
-  <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M4.5 17a8.5 8.5 0 1 1 15 0M12 15l4.5-5.5"/><circle cx="12" cy="15" r="1.3"/></symbol>
-  <symbol id="i-fuel" viewBox="0 0 24 24"><path d="M12 3.500s6 6.300 6 10.800a6 6 0 0 1-12 0C6 9.800 12 3.500 12 3.500z"/></symbol>
   <symbol id="i-plane" viewBox="0 0 24 24"><path d="M21 15.500v-1.800l-7.500-4.700V4a1.500 1.500 0 0 0-3 0v5L3 13.700v1.800l7.500-2.200v4.200L8.500 19v1.500l3.500-1 3.500 1V19l-2-1.500v-4.200z"/></symbol>
-  <symbol id="i-map" viewBox="0 0 24 24"><path d="M9 4 3 6.500v13.500l6-2.500 6 2.500 6-2.500V4l-6 2.500L9 4zM9 4v13.500M15 6.500V20"/></symbol>
-  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M8 4v16M8 4 4.500 7.500M8 4l3.500 3.500M16 20V4M16 20l-3.500-3.500M16 20l3.500-3.500"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.500v.5"/></symbol>
 </svg>
 
 <div id="topbar">
   <div class="tb-in">
-    <button class="brand" type="button" data-go="home" aria-label="Ir al inicio">
+    <button class="brand" type="button" data-go="plane" aria-label="Ir al primer paso">
       <svg class="ic" aria-hidden="true"><use href="#i-plane"/></svg><span>C172 <b>Smart</b></span>
     </button>
-    <button id="chip" class="chip" type="button" data-go="home" title="Cambiar el vuelo">Sin vuelo</button>
+    <button id="chip" class="chip" type="button" data-go="ruta" title="Ver la ruta">Sin ruta</button>
     <div class="unitpick">
       <select id="u_w" aria-label="Unidad de peso" title="Unidad de peso"><option value="lb">lb</option><option value="kg">kg</option></select>
       <select id="u_f" aria-label="Unidad de combustible" title="Unidad de combustible"><option value="gal">gal US</option><option value="L">L</option></select>
     </div>
+    <button id="info_btn" class="infobtn" type="button" data-go="info" aria-label="Información adicional (aeródromos, espacios aéreos, datos del avión)"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg></button>
   </div>
+</div>
+
+<!-- Estado del vuelo: siempre a la vista -->
+<div id="status" aria-label="Estado del vuelo" aria-live="polite">
+  <button id="st_fuel" type="button" data-go="carga"><i class="dot"></i><span><b>Combustible</b><small>—</small></span></button>
+  <button id="st_wb" type="button" data-go="carga" data-open="wb"><i class="dot"></i><span><b>Peso y CG</b><small>—</small></span></button>
+  <button id="st_rwy" type="button" data-go="pista"><i class="dot"></i><span><b>Pista</b><small>—</small></span></button>
 </div>
 
 <main>
 <div id="validation" class="msg bad validation" role="status" hidden></div>
-<!-- ============ INICIO ============ -->
-<section id="home" class="tab active">
-  <div class="hero">
-    <svg class="hero-bg" viewBox="0 0 640 400" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
-      <defs>
-        <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#101b26"/>
-          <stop offset=".42" stop-color="#2d4864"/>
-          <stop offset=".72" stop-color="#d9784a"/>
-          <stop offset="1" stop-color="#f6c27a"/>
-        </linearGradient>
-        <radialGradient id="glow" cx=".5" cy=".5" r=".5">
-          <stop offset="0" stop-color="#ffd9a0" stop-opacity=".55"/>
-          <stop offset="1" stop-color="#ffd9a0" stop-opacity="0"/>
-        </radialGradient>
-      </defs>
-      <rect width="640" height="400" fill="url(#sky)"/>
-      <g fill="#fff" opacity=".55">
-        <circle cx="60" cy="40" r="1.4"/><circle cx="150" cy="86" r="1"/><circle cx="240" cy="30" r="1.3"/><circle cx="330" cy="70" r="1"/>
-        <circle cx="430" cy="28" r="1.4"/><circle cx="520" cy="74" r="1"/><circle cx="600" cy="36" r="1.3"/><circle cx="470" cy="110" r="1"/>
-      </g>
-      <circle cx="470" cy="322" r="120" fill="url(#glow)"/>
-      <circle cx="470" cy="324" r="38" fill="#ffd9a0"/>
-      <g fill="#fff" opacity=".2">
-        <rect x="20" y="268" width="170" height="7" rx="3.5"/><rect x="70" y="284" width="110" height="6" rx="3"/>
-        <rect x="450" y="228" width="150" height="7" rx="3.5"/><rect x="490" y="244" width="120" height="6" rx="3"/>
-      </g>
-      <path d="M0 322 L50 290 L96 310 L150 268 L196 302 L250 254 L298 294 L352 266 L402 308 L458 276 L510 310 L566 284 L610 302 L640 292 V400 H0Z" fill="#5d7690"/>
-      <path d="M232 267 L250 254 L268 269 L259 265 L250 273 L241 265Z M134 280 L150 268 L164 279 L156 277 L150 282 L143 276Z M338 276 L352 266 L366 277 L358 275 L352 280 L345 275Z M444 286 L458 276 L472 287 L464 285 L458 290 L451 284Z" fill="#eef2f6" opacity=".85"/>
-      <path d="M0 348 L70 314 L126 338 L190 298 L240 330 L310 284 L362 322 L420 300 L480 334 L548 298 L600 326 L640 312 V400 H0Z" fill="#33495f"/>
-      <path d="M0 378 L80 354 L150 370 L230 340 L300 368 L380 348 L450 374 L530 352 L600 372 L640 362 V400 H0Z" fill="#1a2a3a"/>
-    </svg>
-    <div class="hero-fg">
-      <svg class="hero-plane" viewBox="36 34 354 122" role="img" aria-label="Cessna 172 en vuelo, vista lateral">
-      <defs>
-  <linearGradient id="pbody" gradientUnits="userSpaceOnUse" x1="0" y1="40" x2="0" y2="120">
-    <stop offset="0" stop-color="#ffffff"/><stop offset=".55" stop-color="#f4f2ea"/><stop offset="1" stop-color="#c7d1d7"/>
-  </linearGradient>
-  <linearGradient id="pglass" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0" stop-color="#37587a"/><stop offset="1" stop-color="#1c3146"/>
-  </linearGradient>
-  <clipPath id="pclip"><path d="M364 88C354 84 344 84 336 83L330 83 306 64C282 61 238 61 214 64L196 72C176 75 150 78 126 78L87 43Q84 40 79 40L67 40Q63 40 62 45L54 88 52 92C104 98 172 111 220 119L318 120C334 120 352 118 364 115Z"/></clipPath>
-</defs>
-      <g id="plane172" stroke-linejoin="round" stroke-linecap="round" stroke="#1b2f3f" stroke-width="1.3">
-  <!-- estabilizador horizontal -->
-  <path d="M40 91Q54 87 96 88.500Q116 90 118 92Q100 95 60 95Q44 95 40 91Z" fill="#f1efe7"/>
-  <!-- fuselaje + deriva (una sola silueta) -->
-  <path d="M364 88C354 84 344 84 336 83L330 83 306 64C282 61 238 61 214 64L196 72C176 75 150 78 126 78L87 43Q84 40 79 40L67 40Q63 40 62 45L54 88 52 92C104 98 172 111 220 119L318 120C334 120 352 118 364 115Z" fill="url(#pbody)"/>
-  <g clip-path="url(#pclip)" stroke="none">
-    <path d="M370 99.500L256 99.500C196 99.500 156 94 120 79C102 71 88 58 76 38" fill="none" stroke="#d9571a" stroke-width="8"/>
-    <path d="M370 107L256 107C196 107 154 101 120 87C104 80 92 68 84 52" fill="none" stroke="#1b3b55" stroke-width="2.200"/>
-  </g>
-  <path d="M72 46 64 87" fill="none" stroke="#9fb0ba" stroke-width="1"/>
-  <path d="M336 84 334 117" fill="none" stroke="#8fa2ad" stroke-width="1"/>
-  <ellipse cx="361" cy="108" rx="2.600" ry="5" fill="#213747" stroke="none"/>
-  <!-- ventanas -->
-  <path d="M327 82 307 67 262 67 258 87 322 87Z" fill="url(#pglass)" stroke-width="1.4"/>
-  <path d="M253 67 223 67Q207 71 205 78L212 87 253 87Z" fill="url(#pglass)" stroke-width="1.4"/>
-  <path d="M301 68 293 68 284 86 292 86Z" fill="#fff" opacity=".13" stroke="none"/>
-  <!-- ala -->
-  <path d="M231 60.500 268 53Q300 50 313 57Q311 64 298 64L231 62.500Z" fill="#fbfaf5"/>
-  <path d="M250 60.500 290 54.500M246 62 296 62.500" fill="none" stroke="#b9c6cd" stroke-width=".9"/>
-  <!-- montante -->
-  <path d="M279 63 267 114" stroke="#1b2f3f" stroke-width="4.600" fill="none"/>
-  <path d="M279 63 267 114" stroke="#dfe6ea" stroke-width="2.400" fill="none"/>
-  <!-- tren de aterrizaje -->
-  <path d="M340 118 343.500 134" stroke-width="4.500" fill="none"/>
-  <circle cx="343.500" cy="141" r="9.500" fill="#16212b"/><circle cx="343.500" cy="141" r="4" fill="#aab6bd" stroke-width="1"/>
-  <path d="M271 117 259 133" stroke-width="5.500" fill="none"/>
-  <circle cx="257" cy="140" r="10" fill="#16212b"/><circle cx="257" cy="140" r="4.200" fill="#aab6bd" stroke-width="1"/>
-  <!-- hélice -->
-  <ellipse cx="373" cy="101" rx="3.500" ry="42" fill="#fff" opacity=".14" stroke="none"/>
-  <path d="M372 99 370.500 60 374.500 60 376 99Z" fill="#1d2933" stroke="none"/>
-  <path d="M370.500 60 374.500 60 374.200 68 370.800 68Z" fill="#f2b632" stroke="none"/>
-  <path d="M372 103 370.500 142 374.500 142 376 103Z" fill="#1d2933" stroke="none"/>
-  <path d="M370.500 142 374.500 142 374.200 134 370.800 134Z" fill="#f2b632" stroke="none"/>
-  <path d="M364 88Q377 91 383 101Q377 111 364 115Z" fill="#dfe5e9"/>
-  <path d="M367 93Q374 95 378 100" fill="none" stroke="#fff" stroke-width="1.500" stroke-opacity=".8"/>
-  <!-- detalles -->
-  <circle cx="65" cy="42.500" r="2" fill="#e63946" stroke="none"/>
-  <path d="M228 63.500 222 51" fill="none" stroke-width="1.100"/>
-</g>
-      </svg>
-    </div>
-    <div class="hero-text">
-      <p class="kicker">Planificador de vuelo</p>
-      <h1>C172 <span>Smart</span></h1>
-      <p class="tag">Peso y balance, performance y combustible para tu Cessna 172, con los aeródromos de Chile.</p>
-    </div>
-  </div>
 
-  <div class="homebody">
-    <div class="card plan">
-      <h2><i class="step">1</i> Tu avión</h2>
-      <input type="hidden" id="fl_model" value="c172s">
-      <div id="model_list" class="models" role="radiogroup" aria-label="Modelo de avión"></div>
-      <label id="tank_row" class="tankrow">Tanques de combustible<select id="m_tank"></select></label>
-      <p class="hint" id="model_specs"></p>
-      <p class="hint">Cada modelo usa las tablas, límites y envolvente de su propio POH (Skyhawk II no es un modelo: es un paquete de equipamiento sobre 172M, N o P). Al cambiar de modelo se precargan los ejemplos del POH (peso vacío, brazo, pesos y combustible típicos).</p>
-    </div>
-
-    <div class="card plan">
-      <h2><i class="step">2</i> Tu vuelo</h2>
-      <div class="ticket" aria-live="polite">
-        <div class="tk-side"><small>Origen</small><b id="tk_from">----</b><span id="tk_from_n">Sin elegir</span></div>
-        <div class="tk-mid">
-          <svg viewBox="0 0 90 24" aria-hidden="true"><path d="M4 12h66" stroke="#e9a066" stroke-width="2" stroke-dasharray="2 5" stroke-linecap="round"/><g transform="translate(66 0)" fill="#fff"><path d="M18 12 8 6 7 7.500 11 12 7 16.500 8 18z"/></g><circle cx="4" cy="12" r="3" fill="#e9a066"/></svg>
-          <b id="tk_dist"></b>
-        </div>
-        <div class="tk-side r"><small>Destino</small><b id="tk_to">----</b><span id="tk_to_n">Sin elegir</span></div>
-        <div class="tk-meta" id="tk_meta">Elige origen y destino para ver distancia, rumbo y tiempo.</div>
-      </div>
-
-      <div class="pickers">
-        <div class="picker">
-          <label for="fl_from_q">Origen</label>
-          <div class="pk-in">
-            <input id="fl_from_q" data-nosave type="search" placeholder="Código, nombre o ciudad (ej. SCEL)" autocomplete="off" autocapitalize="off" spellcheck="false">
-            <button class="pk-clear" id="fl_from_clear" type="button" aria-label="Quitar origen" hidden>×</button>
-          </div>
-          <input type="hidden" id="fl_from" value="">
-          <div class="adlist" id="fl_from_list" role="listbox" aria-label="Resultados de origen"></div>
-          <p class="pk-info" id="fl_from_info"></p>
-        </div>
-        <button type="button" id="fl_swap" class="swap" aria-label="Invertir origen y destino" title="Invertir"><svg class="ic" aria-hidden="true"><use href="#i-swap"/></svg></button>
-        <div class="picker">
-          <label for="fl_to_q">Destino</label>
-          <div class="pk-in">
-            <input id="fl_to_q" data-nosave type="search" placeholder="Código, nombre o ciudad (ej. SCSD)" autocomplete="off" autocapitalize="off" spellcheck="false">
-            <button class="pk-clear" id="fl_to_clear" type="button" aria-label="Quitar destino" hidden>×</button>
-          </div>
-          <input type="hidden" id="fl_to" value="">
-          <div class="adlist" id="fl_to_list" role="listbox" aria-label="Resultados de destino"></div>
-          <p class="pk-info" id="fl_to_info"></p>
-        </div>
-      </div>
-      <p class="hint" id="ad_status">Cargando base de datos…</p>
-      <button class="primary big" id="go_plan" type="button">Planificar vuelo <span aria-hidden="true">→</span></button>
-      <p class="hint center">Puedes entrar sin elegir aeródromos y llenar los datos a mano.</p>
-    </div>
-
-    <div class="card">
-      <h2>Resumen del vuelo</h2>
-      <div class="summary">
-        <button class="sumrow" id="sum_wb" type="button" data-go="wb"><i class="dot"></i><span><b>Peso y balance</b><small></small></span><em aria-hidden="true">›</em></button>
-        <button class="sumrow" id="sum_to" type="button" data-go="perf" data-open="dep"><i class="dot"></i><span><b>Despegue</b><small></small></span><em aria-hidden="true">›</em></button>
-        <button class="sumrow" id="sum_ld" type="button" data-go="perf" data-open="arr"><i class="dot"></i><span><b>Aterrizaje</b><small></small></span><em aria-hidden="true">›</em></button>
-        <button class="sumrow" id="sum_fuel" type="button" data-go="fuel"><i class="dot"></i><span><b>Combustible</b><small></small></span><em aria-hidden="true">›</em></button>
-      </div>
-      <p class="hint">Datos iniciales de ejemplo: revisa la carga, las condiciones y el peso vacío de tu matrícula antes de confiar en el resultado.</p>
-    </div>
-
-    <h3 class="sect">Herramientas</h3>
-    <div class="tiles">
-      <button class="tile t-wb" type="button" data-go="wb"><span class="tic"><svg class="ic"><use href="#i-scale"/></svg></span><b>Peso y balance</b><small>Envolvente de CG</small></button>
-      <button class="tile t-perf" type="button" data-go="perf"><span class="tic"><svg class="ic"><use href="#i-gauge"/></svg></span><b>Performance</b><small>Despegue y aterrizaje</small></button>
-      <button class="tile t-fuel" type="button" data-go="fuel"><span class="tic"><svg class="ic"><use href="#i-fuel"/></svg></span><b>Combustible</b><small>Ruta y reservas</small></button>
-      <button class="tile t-model" type="button" data-go="model"><span class="tic"><svg class="ic"><use href="#i-plane"/></svg></span><b>Avión</b><small>Velocidades y datos</small></button>
-    </div>
-  </div>
-</section>
-
-<!-- ============ PESO Y BALANCE ============ -->
-<section id="wb" class="tab">
-  <div class="pagehead"><h1>Peso y balance</h1><p>Carga, centro de gravedad y envolvente operacional.</p></div>
+<!-- ============ 1 · AVIÓN ============ -->
+<section id="plane" class="tab active">
+  <div class="pagehead"><h1><i class="stepno">1</i>Tu avión</h1><p>Se llena una vez y la app lo recuerda.</p></div>
   <div class="card">
-    <h2>Carga</h2>
-    <table class="grid">
-      <thead><tr><th>Estación</th><th>Peso (<span class="uw">lb</span>)</th><th>Brazo (in)</th><th>Máx.</th></tr></thead>
-      <tbody>
-        <tr><td>Peso vacío (hoja W&amp;B de tu matrícula)</td><td><input id="w_empty" type="number" value="1642"></td><td><input id="a_empty" type="number" step="0.01" value="38.12"></td><td></td></tr>
-        <tr><td>Asientos delanteros</td><td><input id="w_front" type="number" value="340"></td><td id="d_front"></td><td></td></tr>
-        <tr><td>Asientos traseros</td><td><input id="w_rear" type="number" value="0"></td><td id="d_rear"></td><td></td></tr>
-        <tr><td>Equipaje zona A</td><td><input id="w_bagA" type="number" value="0"></td><td id="d_bagA"></td><td id="m_bagA"></td></tr>
-        <tr><td>Equipaje zona B</td><td><input id="w_bagB" type="number" value="0"></td><td id="d_bagB"></td><td id="m_bagB"></td></tr>
-        <tr><td>Combustible (<span class="uf">gal</span>)</td><td><input id="f_gal" type="number" value="40"></td><td id="d_fuel"></td><td id="m_fuel"></td></tr>
-      </tbody>
-    </table>
-    <p class="msg warn" id="empty_note"></p>
-    <p class="hint">Brazos, límites y envolvente vienen del POH del modelo elegido (pestaña <b>Avión</b>). Se descuenta el combustible de rodaje/arranque (pestaña Combustible).</p>
-  </div>
-
-  <div class="card">
-    <h2>Resultado</h2>
-    <table class="grid res">
-      <thead><tr><th></th><th>Peso (<span class="uw">lb</span>)</th><th>CG (in)</th><th>Estado</th></tr></thead>
-      <tbody id="wb_res"></tbody>
-    </table>
-    <div id="wb_msgs"></div>
-    <svg id="chart" class="fig" viewBox="0 0 420 396" role="img" aria-label="Envolvente de centro de gravedad"></svg>
-  </div>
-</section>
-
-<!-- ============ PERFORMANCE ============ -->
-<section id="perf" class="tab">
-  <div class="pagehead"><h1>Performance</h1><p>Despegue y aterrizaje con las tablas del POH: altitud presión, temperatura, peso, viento y superficie.</p></div>
-  <div class="card margincard">
-    <label>Margen de seguridad sobre la pista
-      <select id="p_margin">
-        <option value="0">Sin margen (solo el valor del POH)</option>
-        <option value="10">+10 %</option>
-        <option value="15">+15 %</option>
-        <option value="25" selected>+25 % (recomendado)</option>
-        <option value="50">+50 % (muy conservador)</option>
-      </select></label>
+    <label>Modelo
+      <select id="fl_model"></select></label>
+    <label id="tank_row" class="tankrow">Tanques de combustible<select id="m_tank"></select></label>
+    <p class="hint" id="model_specs"></p>
     <details class="why">
-      <summary>¿Por qué se suma un margen?</summary>
-      <p>Las tablas del POH se midieron con un avión nuevo, motor en perfecto estado, técnica de piloto de pruebas y pista ideal (pavimentada, seca y plana). Un avión con horas de uso, una técnica menos fina, un viento mal estimado o una pista algo distinta rara vez repiten esas cifras.</p>
-      <p>Por eso se suma un porcentaje a la <b>distancia total hasta/desde 50 ft</b> (no solo al recorrido en tierra). Es una práctica de seguridad habitual entre instructores y escuelas, <b>no un valor del POH</b>: el POH no exige ningún margen. Puedes subirlo o bajarlo aquí; con «Sin margen» ves exactamente lo que dice el POH.</p>
+      <summary>¿Y el «Skyhawk II»?</summary>
+      <p>No es un modelo: es un paquete de equipamiento sobre un 172M, N o P. Elige la letra de tu avión. Cada modelo usa las tablas, límites y envolvente de su propio POH, y al cambiarlo se precargan los ejemplos del POH (peso vacío, brazo, pesos y combustible típicos).</p>
     </details>
   </div>
-
-  <div class="seg" id="perf_seg" role="tablist">
-    <button type="button" class="on" data-sub="perf_dep" role="tab">Salida <small id="seg_dep"></small></button>
-    <button type="button" data-sub="perf_arr" role="tab">Llegada <small id="seg_arr"></small></button>
-  </div>
-
-  <!-- ---- Salida ---- -->
-  <div id="perf_dep" class="subpanel on" data-seg="perf_seg">
-    <div class="card apcard">
-      <h2>Aeródromo de salida <small>AIP Chile</small></h2>
-      <p class="hint nomargin" id="dep_empty">Aún no eliges el origen. <button type="button" class="linkbtn" data-go="home">Elegirlo en Inicio</button> o llena los datos a mano.</p>
-      <div id="dep_info" hidden>
-        <div class="apname"><b id="dep_code"></b><span id="dep_name"></span></div>
-        <div class="form">
-          <label>Pista a usar<select id="dep_rwy" data-nosave></select></label>
-        </div>
-        <input type="hidden" id="dep_rwy_sel" value="">
-        <p class="hint" id="dep_apply"></p>
-        <button type="button" class="mini wide" id="dep_load">Cargar en el cálculo</button>
-        <dl id="dep_data" class="addata"></dl>
-        <div id="dep_warn"></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Condiciones en la salida</h2>
-      <div class="form">
-        <label>Elevación aeródromo (ft)<input id="elev" type="number" value="0"></label>
-        <label>QNH (hPa)<input id="qnh" type="number" step="1" value="1013"></label>
-        <label>Temperatura (°C)<input id="oat" type="number" value="15"></label>
-        <label>Pista (ej. 27)<input id="rwy" type="number" min="1" max="36" value="27"></label>
-        <label>Viento dirección (°)<input id="wdir" type="number" min="0" max="360" value="270"></label>
-        <label>Viento velocidad (kt)<input id="wspd" type="number" min="0" value="0"></label>
-      </div>
-      <div id="atm_out" class="kpis"></div>
-    </div>
-
-    <div class="card">
-      <h2>Despegue <small id="to_cond"></small></h2>
-      <div class="form">
-        <label>Peso (<span class="uw">lb</span>)<span class="row"><input id="to_w" type="number" value="2400"><button class="mini" data-copy="to">← W&amp;B</button></span></label>
-        <label>Superficie
-          <select id="to_surf">
-            <option value="1">Asfalto seco (POH)</option>
-            <option value="1.15">Hierba corta seca (POH: +15 %)</option>
-            <option value="1.15">Asfalto mojado (estimación propia)</option>
-            <option value="1.3">Hierba mojada (estimación propia)</option>
-          </select></label>
-        <label>Pista disponible (ft)<input id="to_len" type="number" value="3000"></label>
-      </div>
-      <div id="to_out" class="kpis"></div>
-      <div id="to_notes"></div>
-      <svg id="to_fig" class="fig" viewBox="0 0 480 190" role="img" aria-label="Pista y recorrido de despegue"></svg>
-    </div>
-  </div>
-
-  <!-- ---- Llegada ---- -->
-  <div id="perf_arr" class="subpanel" data-seg="perf_seg">
-    <div class="card apcard">
-      <h2>Aeródromo de llegada <small>AIP Chile</small></h2>
-      <p class="hint nomargin" id="arr_empty">Aún no eliges el destino. <button type="button" class="linkbtn" data-go="home">Elegirlo en Inicio</button> o llena los datos a mano.</p>
-      <div id="arr_info" hidden>
-        <div class="apname"><b id="arr_code"></b><span id="arr_name"></span></div>
-        <div class="form">
-          <label>Pista a usar<select id="arr_rwy" data-nosave></select></label>
-        </div>
-        <input type="hidden" id="arr_rwy_sel" value="">
-        <p class="hint" id="arr_apply"></p>
-        <button type="button" class="mini wide" id="arr_load">Cargar en el cálculo</button>
-        <dl id="arr_data" class="addata"></dl>
-        <div id="arr_warn"></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Condiciones en la llegada</h2>
-      <div class="form">
-        <label>Elevación aeródromo (ft)<input id="a_elev" type="number" value="0"></label>
-        <label>QNH (hPa)<input id="a_qnh" type="number" step="1" value="1013"></label>
-        <label>Temperatura (°C)<input id="a_oat" type="number" value="15"></label>
-        <label>Pista (ej. 27)<input id="a_rwy" type="number" min="1" max="36" value="27"></label>
-        <label>Viento dirección (°)<input id="a_wdir" type="number" min="0" max="360" value="270"></label>
-        <label>Viento velocidad (kt)<input id="a_wspd" type="number" min="0" value="0"></label>
-      </div>
-      <div id="a_atm_out" class="kpis"></div>
-    </div>
-
-    <div class="card">
-      <h2>Aterrizaje <small id="ld_cond"></small></h2>
-      <div class="form">
-        <label>Peso (<span class="uw">lb</span>)<span class="row"><input id="ld_w" type="number" value="2190"><button class="mini" data-copy="ld" title="Peso de despegue menos el combustible de la ruta">← Despegue − ruta</button></span></label>
-        <label>Superficie
-          <select id="ld_surf">
-            <option value="1">Asfalto seco (POH)</option>
-            <option value="1.45">Hierba corta seca (POH: +45 %)</option>
-            <option value="1.3">Asfalto mojado (estimación propia)</option>
-            <option value="1.6">Hierba mojada (estimación propia)</option>
-          </select></label>
-        <label>Pista disponible (ft)<input id="ld_len" type="number" value="3000"></label>
-      </div>
-      <div id="ld_out" class="kpis"></div>
-      <div id="ld_notes"></div>
-      <svg id="ld_fig" class="fig" viewBox="0 0 480 190" role="img" aria-label="Pista y recorrido de aterrizaje"></svg>
-    </div>
-  </div>
-  <p class="hint">Interpolación entre los valores de las tablas del POH (pestaña Avión → Tablas), sin extrapolar fuera de ellas. Viento y hierba seca siguen las notas del POH; "mojado" es una estimación propia, no un dato del POH. El margen de seguridad es una práctica recomendada, no un valor del POH. Cruce sobre el umbral a 50 ft.</p>
-</section>
-
-<!-- ============ COMBUSTIBLE ============ -->
-<section id="fuel" class="tab">
-  <div class="pagehead"><h1>Combustible</h1><p>Ascenso, crucero y reserva con las tablas del POH: tiempo, combustible y alcance.</p></div>
   <div class="card">
-    <h2>Planificador de ruta</h2>
-    <div class="routebox" id="fuel_route" hidden>
-      <span id="fuel_route_txt"></span>
-      <button type="button" class="mini" id="fuel_route_apply">Usar distancia</button>
-    </div>
+    <h2>Peso vacío de tu matrícula</h2>
     <div class="form">
-      <label>Distancia (NM)<input id="r_dist" type="number" value="120"></label>
-      <label>Viento de frente (+) / cola (−) (kt)<input id="r_wind" type="number" value="0"></label>
-      <label>Reserva
-        <select id="r_res">
-          <option value="30">30 min (VFR día)</option>
-          <option value="45">45 min (VFR noche)</option>
-          <option value="60">60 min (prudente)</option>
+      <label>Peso vacío (<span class="uw">lb</span>)<input id="w_empty" type="number" value="1642"></label>
+      <label>Brazo (in)<input id="a_empty" type="number" step="0.01" value="38.12"></label>
+    </div>
+    <p class="msg warn" id="empty_note"></p>
+  </div>
+  <div class="card">
+    <h2>Cómo rinde tu avión</h2>
+    <label>Datos de ascenso y crucero
+      <select id="r_mode">
+        <option value="poh">Tablas del POH</option>
+        <option value="man">Mis valores (los que veo volando)</option>
+      </select></label>
+    <div id="r_poh_x">
+      <label class="gap">Consumo extra sobre el POH
+        <select id="r_extra">
+          <option value="0">+0 % (solo el valor del POH)</option>
+          <option value="5">+5 %</option>
+          <option value="10" selected>+10 % (recomendado)</option>
+          <option value="15">+15 %</option>
+          <option value="20">+20 %</option>
         </select></label>
-      <label>Rodaje + despegue (<span class="uf">gal</span>)<input id="r_taxi" type="number" step="0.1" value="1.4"></label>
+      <details class="why">
+        <summary>¿Por qué un consumo extra?</summary>
+        <p>Las tablas del POH se midieron con un avión nuevo, motor perfecto y mezcla bien pobre. Uno con horas, hélice y mezcla de uso real consume algo más. Este margen se suma al combustible de ascenso, crucero y reserva. Es una práctica de seguridad, <b>no un valor del POH</b>: si ya conoces el consumo real de tu avión, usa «Mis valores».</p>
+      </details>
     </div>
-    <p class="hint" id="taxi_poh"></p>
-
-    <h3 class="subhead">Ascenso y crucero</h3>
-    <div class="form">
-      <label>Datos de ascenso y crucero
-        <select id="r_mode">
-          <option value="poh">Tablas del POH</option>
-          <option value="man">Manual (mis valores)</option>
-        </select></label>
-    </div>
-    <div class="form" id="r_poh_f">
-      <label>Altitud de crucero (ft, altitud presión)<input id="r_alt" type="number" step="500" value="6000"></label>
-      <label>RPM<input id="r_rpm" type="number" step="50" value="2400"></label>
-      <label>Temperatura vs. ISA (°C)<input id="r_isa" type="number" step="1" value="0"></label>
-    </div>
-    <p class="hint" id="r_poh_info"></p>
-    <div class="form" id="r_man_f" hidden>
-      <label>TAS crucero (kt)<input id="r_tas" type="number" value="105"></label>
-      <label>Consumo crucero (<span class="uf">gal</span>/h)<input id="r_burn" type="number" step="0.1" value="8.5"></label>
+    <div class="form gap" id="r_man_f" hidden>
+      <label>Velocidad verdadera de crucero (kt)<input id="r_tas" type="number" value="105"></label>
+      <label>Consumo de crucero (<span class="uf">gal</span>/h)<input id="r_burn" type="number" step="0.1" value="8.5"></label>
       <label>Combustible de ascenso (<span class="uf">gal</span>)<input id="r_climb" type="number" step="0.1" value="1.5"></label>
     </div>
-
-    <div id="fuel_msg"></div>
-    <div class="phwrap"><table id="fuel_tbl" class="grid phases"></table></div>
-    <div id="fuel_out" class="kpis"></div>
-    <button id="fuel_apply" class="primary">Usar este combustible en Peso y balance</button>
-    <p class="hint" id="fuel_note"></p>
   </div>
+  <button class="primary next" type="button" data-go="ruta">Siguiente: armar la ruta <span aria-hidden="true">→</span></button>
 </section>
 
-<!-- ============ RUTA (mapa + planificador por tramos) ============ -->
+<!-- ============ 2 · RUTA ============ -->
 <section id="ruta" class="tab">
-  <div class="pagehead"><h1>Ruta</h1><p>Toca el mapa o busca un aeródromo para armar tu ruta. Rumbo, tiempo y combustible por tramo.</p></div>
+  <div class="pagehead"><h1><i class="stepno">2</i>Tu ruta</h1><p>Busca un aeródromo o toca el mapa. El primero es el origen y el último, el destino.</p></div>
   <div class="rt-search">
     <input id="rt_q" data-nosave type="search" placeholder="Agregar aeródromo: código o nombre (ej. SCTB, Vitacura)" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Buscar aeródromo para agregar a la ruta">
     <div id="rt_list" class="adlist rt-list" role="listbox" hidden></div>
@@ -431,7 +117,7 @@
       </div>
     </div>
   </div>
-  <p class="hint" id="rt_hint">Toca un aeródromo para agregarlo a la ruta, o toca cualquier punto del mapa para ver qué espacios aéreos hay ahí y agregarlo.</p>
+  <p class="hint" id="rt_hint">Toca un aeródromo del mapa para agregarlo, o cualquier punto para ver qué espacios aéreos hay ahí.</p>
 
   <div class="card" id="rt_card">
     <div class="rt-head"><h2>Tu ruta</h2>
@@ -442,65 +128,323 @@
     </div>
     <ol id="rt_pts" class="rt-pts"></ol>
     <p class="hint" id="rt_empty">Aún no hay puntos. Busca un aeródromo arriba o toca el mapa.</p>
-    <div id="rt_vrc" class="rt-vrc" hidden></div>
-    <div id="rt_rv" class="rt-rv" hidden></div>
+    <div id="rt_sum" class="rt-sum" hidden></div>
+    <div id="rt_alerts"></div>
+  </div>
+  <button class="primary next" type="button" data-go="viento">Siguiente: viento y altitud <span aria-hidden="true">→</span></button>
+</section>
 
-    <div id="rt_plan" hidden>
-      <div class="form rt-form">
-        <label>Viento desde (° verdaderos)<input id="ru_wdir" type="number" min="0" max="360" value="0"></label>
-        <label>Velocidad del viento (kt)<input id="ru_wspd" type="number" min="0" value="0"></label>
-        <label>Declinación magnética (° E +, W −)<input id="ru_var" type="number" step="0.1" value="0.9"></label>
-      </div>
-      <p class="hint" id="rt_var_note">Declinación: 0,9° E es la que publica el AIP en las cartas de Santiago (2023); cámbiala si vuelas en otra zona. El viento es el mismo en todos los tramos.</p>
-      <p class="hint" id="rt_cruise"></p>
-      <div id="rt_msg"></div>
-      <div class="phwrap"><table id="rt_tbl" class="grid phases rt-tbl"></table></div>
-      <div id="rt_kpis" class="kpis"></div>
-      <h3 class="subhead">Espacios aéreos en tu ruta</h3>
-      <div id="rt_air"></div>
-      <div class="rt-btns">
-        <button type="button" id="rt_to_wb" class="primary">Cargar este combustible en Peso y balance</button>
-        <button type="button" id="rt_to_fuel" class="secondary">Usar distancia y viento en Combustible</button>
-      </div>
-      <p class="hint" id="rt_note"></p>
+<!-- ============ 3 · VIENTO ============ -->
+<section id="viento" class="tab">
+  <div class="pagehead"><h1><i class="stepno">3</i>Viento y altitud</h1><p>A qué hora sales, a qué altura vuelas y qué viento hay en cada tramo.</p></div>
+  <div id="vi_none" class="msg warn" hidden>Primero arma la ruta (paso 2): el viento se calcula tramo por tramo.</div>
+  <div class="card">
+    <h2>Salida y altitud</h2>
+    <div class="form">
+      <label>Salida (hora local)<input id="vi_etd" type="datetime-local"></label>
+      <label>Altitud de crucero (ft, altitud presión)<input id="r_alt" type="number" step="500" value="6000"></label>
     </div>
+    <div class="form gap" id="r_poh_f">
+      <label>RPM<input id="r_rpm" type="number" step="50" value="2400"></label>
+      <label>Temperatura vs. ISA (°C)<input id="r_isa" type="number" step="1" value="0"></label>
+    </div>
+    <p class="hint" id="r_poh_info"></p>
+    <p class="hint" id="rt_cruise"></p>
+  </div>
+  <div class="card">
+    <h2>Viento en cada tramo</h2>
+    <button class="primary" type="button" id="vi_fetch">Obtener viento en vivo</button>
+    <p class="hint" id="vi_status"></p>
+    <div id="vi_msg"></div>
+    <div class="phwrap"><table id="vi_tbl" class="grid phases vi-tbl"></table></div>
+    <div class="rt-btns"><button type="button" id="vi_same" class="secondary">Usar el viento del primer tramo en todos</button></div>
+    <p class="hint" id="vi_legend"></p>
+  </div>
+  <div class="card">
+    <h2>Declinación magnética</h2>
+    <label>Declinación (° E +, W −)<input id="ru_var" type="number" step="0.1" value="0.9"></label>
+    <p class="hint">0,9° E es la que publica el AIP en las cartas de Santiago (2023). Cámbiala si vuelas en otra zona: el rumbo magnético de la bitácora depende de ella.</p>
+  </div>
+  <p class="hint src">Viento en vivo: pronóstico de modelo numérico de <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a> (licencia CC BY 4.0), interpolado a tu altitud. Es <b>referencial</b>: no reemplaza el METAR/TAF, el viento en altura ni los avisos de la DMC.</p>
+  <button class="primary next" type="button" data-go="carga">Siguiente: carga y combustible <span aria-hidden="true">→</span></button>
+</section>
+
+<!-- ============ 4 · CARGA Y COMBUSTIBLE ============ -->
+<section id="carga" class="tab">
+  <div class="pagehead"><h1><i class="stepno">4</i>Carga y combustible</h1><p>¿Alcanza el combustible? ¿Estás dentro de peso y centro de gravedad?</p></div>
+  <div id="fuel_verdict"></div>
+  <div class="card">
+    <h2>Combustible</h2>
+    <div class="form">
+      <label>Combustible cargado (<span class="uf">gal</span>)<input id="f_gal" type="number" step="0.1" value="40"></label>
+      <label>Reserva
+        <select id="r_res">
+          <option value="30">30 min (VFR día)</option>
+          <option value="45">45 min (VFR noche)</option>
+          <option value="60">60 min (prudente)</option>
+        </select></label>
+      <label>Rodaje + despegue (<span class="uf">gal</span>)<input id="r_taxi" type="number" step="0.1" value="1.4"></label>
+    </div>
+    <p class="hint" id="taxi_poh"></p>
+    <div class="picker alt">
+      <label for="alt_q">Aeródromo alterno (opcional)</label>
+      <div class="pk-in">
+        <input id="alt_q" data-nosave type="search" placeholder="Código o nombre (ej. SCEL)" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button class="pk-clear" id="alt_clear" type="button" aria-label="Quitar alterno" hidden>×</button>
+      </div>
+      <input type="hidden" id="alt_icao" value="">
+      <div class="adlist" id="alt_list" role="listbox" aria-label="Resultados de alterno"></div>
+      <p class="pk-info" id="alt_info"></p>
+    </div>
+    <button id="fuel_apply" class="primary" type="button">Cargar el combustible necesario</button>
+    <div id="fuel_out" class="kpis"></div>
+    <div class="phwrap"><table id="fuel_tbl" class="grid phases"></table></div>
+    <details class="why"><summary>Cómo se calculó</summary><p id="fuel_note"></p></details>
+  </div>
+
+  <div class="card">
+    <h2>Pasajeros y equipaje</h2>
+    <table class="grid">
+      <thead><tr><th>Estación</th><th>Peso (<span class="uw">lb</span>)</th><th>Brazo (in)</th><th>Máx.</th></tr></thead>
+      <tbody>
+        <tr><td>Asientos delanteros</td><td><input id="w_front" type="number" value="340"></td><td id="d_front"></td><td></td></tr>
+        <tr><td>Asientos traseros</td><td><input id="w_rear" type="number" value="0"></td><td id="d_rear"></td><td></td></tr>
+        <tr><td>Equipaje zona A</td><td><input id="w_bagA" type="number" value="0"></td><td id="d_bagA"></td><td id="m_bagA"></td></tr>
+        <tr><td>Equipaje zona B</td><td><input id="w_bagB" type="number" value="0"></td><td id="d_bagB"></td><td id="m_bagB"></td></tr>
+      </tbody>
+    </table>
+    <p class="hint">El combustible de arriba y el peso vacío del paso 1 entran solos. Brazos, límites y envolvente son los del POH del modelo.</p>
+  </div>
+
+  <div class="card">
+    <h2>Resultado de peso y balance</h2>
+    <div id="wb_msgs"></div>
+    <table class="grid res">
+      <thead><tr><th></th><th>Peso (<span class="uw">lb</span>)</th><th>CG (in)</th><th>Estado</th></tr></thead>
+      <tbody id="wb_res"></tbody>
+    </table>
+    <details class="why" open><summary>Gráfico de la envolvente</summary>
+      <svg id="chart" class="fig" viewBox="0 0 420 396" role="img" aria-label="Envolvente de centro de gravedad"></svg>
+    </details>
+  </div>
+  <button class="primary next" type="button" data-go="pista">Siguiente: despegue y aterrizaje <span aria-hidden="true">→</span></button>
+</section>
+
+<!-- ============ 5 · DESPEGUE Y ATERRIZAJE ============ -->
+<section id="pista" class="tab">
+  <div class="pagehead"><h1><i class="stepno">5</i>Despegue y aterrizaje</h1><p>Con las tablas del POH: ¿cabes en la pista que tienes?</p></div>
+  <input type="hidden" id="fl_from" value=""><input type="hidden" id="fl_to" value="">
+  <div class="card margincard">
+    <label>Margen de seguridad sobre la pista
+      <select id="p_margin">
+        <option value="0">Sin margen (solo el valor del POH)</option>
+        <option value="10">+10 %</option>
+        <option value="15">+15 %</option>
+        <option value="25" selected>+25 % (recomendado)</option>
+        <option value="50">+50 % (muy conservador)</option>
+      </select></label>
+    <details class="why">
+      <summary>¿Por qué se suma un margen?</summary>
+      <p>Las tablas del POH se midieron con un avión nuevo, motor en perfecto estado, técnica de piloto de pruebas y pista ideal (pavimentada, seca y plana). Un avión con horas de uso, una técnica menos fina, un viento mal estimado o una pista algo distinta rara vez repiten esas cifras.</p>
+      <p>Por eso se suma un porcentaje a la <b>distancia total hasta/desde 50 ft</b> (no solo al recorrido en tierra). Es una práctica de seguridad habitual entre instructores y escuelas, <b>no un valor del POH</b>. Con «Sin margen» ves exactamente lo que dice el POH.</p>
+    </details>
+  </div>
+
+  <div class="seg" id="pista_seg" role="tablist">
+    <button type="button" class="on" data-sub="pista_dep" role="tab">Salida <small id="seg_dep"></small></button>
+    <button type="button" data-sub="pista_arr" role="tab">Llegada <small id="seg_arr"></small></button>
+  </div>
+
+  <!-- ---- Salida ---- -->
+  <div id="pista_dep" class="subpanel on" data-seg="pista_seg">
+    <div class="card apcard">
+      <p class="hint nomargin" id="dep_empty">Aún no hay origen. <button type="button" class="linkbtn" data-go="ruta">Elígelo en la ruta</button>.</p>
+      <div id="dep_info" hidden>
+        <div class="apname"><b id="dep_code"></b><span id="dep_name"></span></div>
+        <dl id="dep_data" class="addata"></dl>
+        <div id="dep_warn"></div>
+        <div class="form gap"><label>Pista a usar<select id="dep_rwy" data-nosave></select></label></div>
+        <input type="hidden" id="dep_rwy_sel" value="">
+        <p class="hint" id="dep_apply"></p>
+        <button type="button" class="linkbtn" data-go="info" data-open="ad" data-ad="dep">Ver todos los datos de este aeródromo</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Condiciones en la salida</h2>
+      <button type="button" class="mini wide" id="dep_met">Usar el pronóstico de viento, temperatura y QNH</button>
+      <p class="hint" id="dep_met_note"></p>
+      <div class="form">
+        <label>Viento desde (° magnéticos)<input id="wdir" type="number" min="0" max="360" value="270"></label>
+        <label>Viento (kt)<input id="wspd" type="number" min="0" value="0"></label>
+        <label>Temperatura (°C)<input id="oat" type="number" value="15"></label>
+        <label>QNH (hPa)<input id="qnh" type="number" step="1" value="1013"></label>
+        <label>Elevación (ft)<input id="elev" type="number" value="0"></label>
+        <label>Pista (ej. 27)<input id="rwy" type="number" min="1" max="36" value="27"></label>
+        <label>Pista disponible (ft)<input id="to_len" type="number" value="3000"></label>
+        <label>Superficie
+          <select id="to_surf">
+            <option value="1">Asfalto seco (POH)</option>
+            <option value="1.15">Hierba corta seca (POH: +15 %)</option>
+            <option value="1.15">Asfalto mojado (estimación propia)</option>
+            <option value="1.3">Hierba mojada (estimación propia)</option>
+          </select></label>
+      </div>
+      <input type="hidden" id="to_w" value="2400">
+      <div id="atm_out" class="kpis"></div>
+    </div>
+    <div class="card">
+      <h2>Despegue <small id="to_cond"></small></h2>
+      <p class="hint nomargin" id="to_wtxt"></p>
+      <div id="to_out" class="kpis"></div>
+      <div id="to_notes"></div>
+      <svg id="to_fig" class="fig" viewBox="0 0 480 190" role="img" aria-label="Pista y recorrido de despegue"></svg>
+    </div>
+  </div>
+
+  <!-- ---- Llegada ---- -->
+  <div id="pista_arr" class="subpanel" data-seg="pista_seg">
+    <div class="card apcard">
+      <p class="hint nomargin" id="arr_empty">Aún no hay destino. <button type="button" class="linkbtn" data-go="ruta">Elígelo en la ruta</button>.</p>
+      <div id="arr_info" hidden>
+        <div class="apname"><b id="arr_code"></b><span id="arr_name"></span></div>
+        <dl id="arr_data" class="addata"></dl>
+        <div id="arr_warn"></div>
+        <div class="form gap"><label>Pista a usar<select id="arr_rwy" data-nosave></select></label></div>
+        <input type="hidden" id="arr_rwy_sel" value="">
+        <p class="hint" id="arr_apply"></p>
+        <button type="button" class="linkbtn" data-go="info" data-open="ad" data-ad="arr">Ver todos los datos de este aeródromo</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Condiciones en la llegada</h2>
+      <button type="button" class="mini wide" id="arr_met">Usar el pronóstico de viento, temperatura y QNH</button>
+      <p class="hint" id="arr_met_note"></p>
+      <div class="form">
+        <label>Viento desde (° magnéticos)<input id="a_wdir" type="number" min="0" max="360" value="270"></label>
+        <label>Viento (kt)<input id="a_wspd" type="number" min="0" value="0"></label>
+        <label>Temperatura (°C)<input id="a_oat" type="number" value="15"></label>
+        <label>QNH (hPa)<input id="a_qnh" type="number" step="1" value="1013"></label>
+        <label>Elevación (ft)<input id="a_elev" type="number" value="0"></label>
+        <label>Pista (ej. 27)<input id="a_rwy" type="number" min="1" max="36" value="27"></label>
+        <label>Pista disponible (ft)<input id="ld_len" type="number" value="3000"></label>
+        <label>Superficie
+          <select id="ld_surf">
+            <option value="1">Asfalto seco (POH)</option>
+            <option value="1.45">Hierba corta seca (POH: +45 %)</option>
+            <option value="1.3">Asfalto mojado (estimación propia)</option>
+            <option value="1.6">Hierba mojada (estimación propia)</option>
+          </select></label>
+      </div>
+      <input type="hidden" id="ld_w" value="2190">
+      <div id="a_atm_out" class="kpis"></div>
+    </div>
+    <div class="card">
+      <h2>Aterrizaje <small id="ld_cond"></small></h2>
+      <p class="hint nomargin" id="ld_wtxt"></p>
+      <div id="ld_out" class="kpis"></div>
+      <div id="ld_notes"></div>
+      <svg id="ld_fig" class="fig" viewBox="0 0 480 190" role="img" aria-label="Pista y recorrido de aterrizaje"></svg>
+    </div>
+  </div>
+  <p class="hint">Interpolación entre los valores de las tablas del POH, sin extrapolar fuera de ellas. Viento y hierba seca siguen las notas del POH; «mojado» es una estimación propia. El margen es una práctica recomendada, no un valor del POH. Cruce sobre el umbral a 50 ft.</p>
+  <button class="primary next" type="button" data-go="pvo">Siguiente: bitácora de navegación (PVO) <span aria-hidden="true">→</span></button>
+</section>
+
+<!-- ============ 6 · PVO ============ -->
+<section id="pvo" class="tab">
+  <div class="pagehead"><h1><i class="stepno">6</i>PVO</h1><p>Bitácora de navegación de tu ruta, lista para imprimir o llevar en el celular.</p></div>
+  <div id="pvo_none" class="msg warn" hidden>Arma una ruta con al menos dos puntos (paso 2) para generar la bitácora.</div>
+  <div id="pvo_body">
+    <div class="card noprint">
+      <h2>Datos para la hoja</h2>
+      <div class="form">
+        <label>Matrícula<input id="pl_reg" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="CC-XXX" maxlength="8"></label>
+        <label>Piloto al mando<input id="pl_pilot" type="text" autocomplete="off" spellcheck="false" maxlength="40"></label>
+      </div>
+      <p class="hint">Estos datos quedan solo en este dispositivo.</p>
+      <div class="rt-btns">
+        <button type="button" class="primary" id="pvo_print">Imprimir o guardar como PDF</button>
+        <button type="button" class="secondary" id="pvo_copy">Copiar como texto</button>
+      </div>
+      <p class="hint" id="pvo_status"></p>
+    </div>
+    <div id="pvo_sheet" class="sheet"></div>
   </div>
 </section>
 
-<!-- ============ AVIÓN (velocidades, modelo, tablas) ============ -->
-<section id="model" class="tab">
-  <div class="pagehead"><h1>Avión</h1><p>Datos del POH del modelo elegido (solo lectura).</p></div>
-  <p class="msg warn">Estos datos están transcritos del POH. Verifícalos contra tu ejemplar antes de volar con ellos: si ves una diferencia, no confíes en la app y avísame.</p>
-  <div class="seg" id="model_seg" role="tablist">
-    <button type="button" class="on" data-sub="model_speeds" role="tab">Velocidades</button>
-    <button type="button" data-sub="model_lim" role="tab">Límites y CG</button>
-    <button type="button" data-sub="model_tab" role="tab">Tablas</button>
+<!-- ============ INFORMACIÓN ADICIONAL ============ -->
+<section id="info" class="tab">
+  <div class="pagehead"><h1>Información adicional</h1><p>Lo que no hace falta mientras planificas, pero conviene tener a mano.</p></div>
+  <div class="seg" id="info_seg" role="tablist">
+    <button type="button" class="on" data-sub="info_ad" role="tab">Aeródromos</button>
+    <button type="button" data-sub="info_air" role="tab">Espacios aéreos</button>
+    <button type="button" data-sub="info_rv" role="tab">Rutas AIP</button>
+    <button type="button" data-sub="info_plane" role="tab">Avión</button>
   </div>
 
-  <div id="model_speeds" class="subpanel on" data-seg="model_seg"><div id="spd_view"></div></div>
-  <div id="model_lim" class="subpanel" data-seg="model_seg"><div id="lim_view"></div></div>
-  <div id="model_tab" class="subpanel" data-seg="model_seg"><div id="tab_view"></div></div>
+  <div id="info_ad" class="subpanel on" data-seg="info_seg">
+    <div class="card">
+      <div id="info_chips" class="chips"></div>
+      <div class="picker">
+        <label for="info_q">Buscar otro aeródromo</label>
+        <div class="pk-in"><input id="info_q" data-nosave type="search" placeholder="Código, nombre o ciudad" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+        <div class="adlist" id="info_list" role="listbox" aria-label="Resultados"></div>
+      </div>
+    </div>
+    <div class="card" id="info_card" hidden>
+      <div class="apname"><b id="info_code"></b><span id="info_name"></span></div>
+      <dl id="info_data" class="addata"></dl>
+      <div id="info_warn"></div>
+    </div>
+    <p class="hint" id="ad_status">Cargando base de datos…</p>
+  </div>
+
+  <div id="info_air" class="subpanel" data-seg="info_seg">
+    <div class="card">
+      <h2>Espacios aéreos en tu ruta</h2>
+      <div id="rt_air"></div>
+    </div>
+  </div>
+
+  <div id="info_rv" class="subpanel" data-seg="info_seg">
+    <div class="card">
+      <h2>Salidas y llegadas visuales (AIP)</h2>
+      <p class="hint" id="rv_empty">Aparecen cuando el origen o el destino de tu ruta tiene rutas visuales publicadas en el AIP (hoy: aeródromos de Santiago).</p>
+      <div id="rt_vrc" class="rt-vrc" hidden></div>
+      <div id="rt_rv" class="rt-rv" hidden></div>
+    </div>
+  </div>
+
+  <div id="info_plane" class="subpanel" data-seg="info_seg">
+    <p class="msg warn">Estos datos están transcritos del POH. Verifícalos contra tu ejemplar antes de volar con ellos: si ves una diferencia, no confíes en la app y avísame.</p>
+    <div id="spd_view"></div>
+    <div id="lim_view"></div>
+    <div id="tab_view"></div>
+  </div>
 </section>
 
 <footer>
-  ⚠️ Herramienta de apoyo a la planificación, <b>no sustituye al POH/AFM de tu avión</b> ni al criterio del piloto al mando. Datos de aeródromos extraídos automáticamente del AIP Chile: verifícalos con la publicación vigente.
+  ⚠️ Herramienta de apoyo a la planificación, <b>no sustituye al POH/AFM de tu avión ni al criterio del piloto al mando</b>. Datos de aeródromos y espacios aéreos extraídos del AIP Chile: verifícalos con la publicación vigente.
 </footer>
 </main>
 
-<nav id="tabs" aria-label="Secciones">
-  <button type="button" data-tab="home" class="active" aria-current="page"><svg class="ic"><use href="#i-home"/></svg><span>Inicio</span></button>
-  <button type="button" data-tab="wb"><svg class="ic"><use href="#i-scale"/></svg><span>Peso</span></button>
-  <button type="button" data-tab="perf"><svg class="ic"><use href="#i-gauge"/></svg><span>Performance</span></button>
-  <button type="button" data-tab="ruta"><svg class="ic"><use href="#i-map"/></svg><span>Ruta</span></button>
-  <button type="button" data-tab="fuel"><svg class="ic"><use href="#i-fuel"/></svg><span>Combustible</span></button>
-  <button type="button" data-tab="model"><svg class="ic"><use href="#i-plane"/></svg><span>Avión</span></button>
+<nav id="tabs" aria-label="Pasos del vuelo">
+  <button type="button" data-tab="plane" class="active" aria-current="page"><i class="no">1</i><span>Avión</span></button>
+  <button type="button" data-tab="ruta"><i class="no">2</i><span>Ruta</span></button>
+  <button type="button" data-tab="viento"><i class="no">3</i><span>Viento</span></button>
+  <button type="button" data-tab="carga"><i class="no">4</i><span>Carga</span></button>
+  <button type="button" data-tab="pista"><i class="no">5</i><span>Pista</span></button>
+  <button type="button" data-tab="pvo"><i class="no">6</i><span>PVO</span></button>
 </nav>
 
 <script src="modelos.js"></script>
+<script src="ruta.js"></script>
+<script src="viento.js"></script>
 <script src="app.js"></script>
 <script src="aerodromos.js"></script>
 <script src="vendor/leaflet/leaflet.js"></script>
-<script src="ruta.js"></script>
 <script src="mapa.js"></script>
+<script src="viaje.js"></script>
+<script src="pvo.js"></script>
 </body>
 </html>

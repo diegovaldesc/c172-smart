@@ -49,6 +49,27 @@ near(pl.legs[0].mh, ((pl.legs[0].th - 5) + 360) % 360, 1e-9, 'rumbo magnético =
 pl = R.plan([A, B], { tas: 50, gph: 9, climb: { min: 0, gal: 0, nm: 0 }, taxi: 0, resMin: 0, wdir: 0, wspd: 80 });
 assert.strictEqual(pl.ok, false, 'viento mayor que la TAS: la ruta no avanza');
 
+// ---- un viento distinto por tramo (viento en vivo) ----
+{
+  const E = R.dir(A, 90, 60), F = R.dir(E, 0, 60);                       // tramo 1 al este, tramo 2 al norte
+  const o = { tas: 100, gph: 9, climb: { min: 0, gal: 0, nm: 0 }, taxi: 0, resMin: 0, vari: 0 };
+  const pw = R.plan([A, E, F], { ...o, winds: [{ dir: 90, spd: 20 }, { dir: 180, spd: 10 }] });   // viento de frente en el 1.º, de cola en el 2.º
+  near(pw.legs[0].gs, 80, 1e-6, 'tramo 1: viento de frente'); near(pw.legs[1].gs, 110, 1e-6, 'tramo 2: viento de cola');
+  near(pw.legs[0].wdir, 90, 1e-9, 'el tramo recuerda su viento'); near(pw.legs[1].wspd, 10, 1e-9, 'el tramo recuerda su viento (vel.)');
+  near(pw.min, 60 / 80 * 60 + 60 / 110 * 60, 1e-6, 'tiempo = suma de los tramos con su viento');
+  near(pw.legs[0].minCum, 45, 1e-6, 'tiempo acumulado al final del tramo 1'); near(pw.legs[1].minCum, pw.min, 1e-9, 'el acumulado final es el total');
+  near(pw.legs[1].galCum, pw.galEnroute, 1e-9, 'combustible acumulado final = combustible de ruta');
+  const same = R.plan([A, E, F], { ...o, wdir: 90, wspd: 20 }), arr = R.plan([A, E, F], { ...o, winds: [{ dir: 90, spd: 20 }, { dir: 90, spd: 20 }] });
+  near(same.min, arr.min, 1e-9, 'viento único = el mismo viento en cada tramo');
+  const part = R.plan([A, E, F], { ...o, wdir: 90, wspd: 20, winds: [{ dir: 270, spd: 20 }] });          // solo el tramo 1 tiene viento propio; el 2.º usa wdir/wspd
+  near(part.legs[0].gs, 120, 1e-6, 'tramo con viento propio'); near(part.legs[1].wspd, 20, 1e-9, 'tramo sin viento propio usa el general');
+  const man = R.plan([A, E, F], { ...o, climb: { min: 0, gal: 1.5, nm: 0 } });                          // valores propios: el ascenso es combustible extra, una sola vez
+  near(man.galClimb, 1.5, 1e-9, 'combustible de ascenso manual entra al plan'); near(man.galTotal, 1.5 + 120 / 100 * 9, 1e-9, 'total = ascenso extra + crucero');
+  near(man.legs[1].climbGal, 0, 1e-9, 'y no se repite en el segundo tramo');
+  const bad = R.plan([A, E, F], { ...o, winds: [{ dir: 0, spd: 0 }, { dir: 90, spd: 150 }] });
+  assert.strictEqual(bad.ok, false, 'un tramo sin avance invalida el plan'); assert(bad.legs[1].noWind && bad.legs[1].wspd === 150, 'el tramo sin avance queda marcado');
+}
+
 // ---- geometría de espacios ----
 const sq = [[0, 0], [0, 2], [2, 2], [2, 0]];
 assert(R.ringContains(sq, 1, 1) && !R.ringContains(sq, 3, 1) && !R.ringContains(sq, 1, -0.1), 'punto en polígono');

@@ -1,6 +1,7 @@
 'use strict';
-// Aeródromos de Chile (AIP Vol. I): elección de origen y destino en Inicio y carga de datos de pista en la calculadora.
-// Los textos vienen del AIP (extracción automática): se insertan siempre con textContent, nunca como HTML.
+// Aeródromos de Chile (AIP Vol. I): búsqueda, datos de pista para Despegue y aterrizaje, y ficha completa en «Información adicional».
+// El origen y el destino los fija la ruta (mapa.js, vía setEnds). Los textos vienen del AIP (extracción automática):
+// se insertan siempre con textContent, nunca como HTML.
 (function () {
   const M_TO_FT = 3.28084, R_NM = 3440.065;
   const el = id => document.getElementById(id);
@@ -86,10 +87,10 @@
     return { nm, brg: (Math.atan2(y, x) / r + 360) % 360 };
   }
 
-  // ---------- buscadores de Inicio ----------
-  // items: aeródromos a mostrar; opts.group = con encabezados por región (modo explorar); opts.note = texto de cabecera
-  function renderList(key, items, opts = {}) {
-    const box = el(`fl_${key}_list`);
+  // ---------- buscador de aeródromos (alterno e Información) ----------
+  // cfg: { q, list, clear?, get: () => icao actual, set: icao => void }
+  function renderList(cfg, items, opts = {}) {
+    const box = el(cfg.list);
     box.replaceChildren();
     if (opts.note) box.append(make('div', opts.note, 'adnote'));
     if (!items.length) box.append(make('p', 'Sin coincidencias. Prueba con otra parte del nombre, la ciudad o la región.', 'hint'));
@@ -103,75 +104,35 @@
       const meta = [a.c, opts.group ? '' : regionName(a.r), a.t === 'AP' ? 'aeropuerto' : '', ALIAS[a.i] ? 'también «' + ALIAS[a.i] + '»' : ''].filter(Boolean).join(' · ');
       txt.append(make('em', a.n), make('small', meta));
       b.append(make('b', a.i), txt, make('span', a.el != null ? nf(a.el) + ' ft' : ''));
-      b.addEventListener('click', () => { setAerodrome(key, a.i, false); el(`fl_${key}_q`).blur(); });
+      b.addEventListener('click', () => { cfg.set(a.i); el(cfg.q).blur(); });
       box.append(b);
     }
     box.scrollTop = 0;
   }
-
   // Lo que muestra la lista según lo escrito: sin texto = todos los aeródromos por región; con texto = coincidencias
-  function showList(key, text) {
+  function showList(cfg, text) {
     if (!norm(text).trim()) {
-      renderList(key, browse(), { group: true, note: `${DB.length} aeródromos, de norte a sur. Escribe el nombre, la ciudad, la región o el código para acotar.` });
+      renderList(cfg, browse(), { group: true, note: `${DB.length} aeródromos, de norte a sur. Escribe el nombre, la ciudad, la región o el código para acotar.` });
       return;
     }
     const r = search(text);
-    renderList(key, r.items, { note: r.total ? (r.total > r.items.length ? `${r.total} coincidencias, se muestran ${r.items.length}. Sigue escribiendo para acotar.` : `${r.total} ${r.total === 1 ? 'coincidencia' : 'coincidencias'}`) : '' });
+    renderList(cfg, r.items, { note: r.total ? (r.total > r.items.length ? `${r.total} coincidencias, se muestran ${r.items.length}. Sigue escribiendo para acotar.` : `${r.total} ${r.total === 1 ? 'coincidencia' : 'coincidencias'}`) : '' });
   }
-
-  function pickInfo(key, a) {
-    const p = el(`fl_${key}_info`);
-    if (!a) { p.textContent = ''; return; }
-    const rw = a.rw.map(r => r.a + (r.b ? '/' + r.b : '')).filter(Boolean).join(', ');
-    p.textContent = [a.el != null ? 'Elev. ' + nf(a.el) + ' ft' : '', rw ? 'Pistas ' + rw : '', a.q ? '' : '⚠ datos incompletos, verifica en el AIP'].filter(Boolean).join(' · ');
-  }
-
-  function setAerodrome(key, icao, restore) {
-    const a = get(icao);
-    el('fl_' + key).value = a ? a.i : '';
-    el(`fl_${key}_q`).value = a ? label(a) : '';
-    el(`fl_${key}_list`).replaceChildren();
-    el(`fl_${key}_clear`).hidden = !a;
-    pickInfo(key, a);
-    renderPanel(PANEL_OF[key], a, restore);
-    if (!restore) {
-      // con origen y destino, la distancia de la ruta pasa al planificador de combustible
-      const rt = route(get(el('fl_from').value), get(el('fl_to').value));
-      if (rt) el('r_dist').value = Math.ceil(rt.nm);
-      if (window.MAPA && window.MAPA.homeChanged) window.MAPA.homeChanged(key, a);   // la ruta del mapa sigue al origen/destino de Inicio
-      recalcNow();
-    }
-  }
-  // Origen y destino desde el mapa (null = sin cambio). El mapa ya conoce el cambio: no se le avisa de vuelta.
-  function setEnds(from, to) {
-    if (from !== undefined && from !== null && get(from) && el('fl_from').value !== from) setAerodrome('from', from, false);
-    if (to !== undefined && to !== null && get(to) && el('fl_to').value !== to) setAerodrome('to', to, false);
-  }
-
-  function swap() {
-    const f = el('fl_from').value, t = el('fl_to').value;
-    setAerodrome('from', t, false);
-    setAerodrome('to', f, false);
-  }
-
-  function bindPicker(key) {
-    const q = el(`fl_${key}_q`), list = el(`fl_${key}_list`);
-    const picker = q.closest('.picker');
-    const current = () => { const a = get(el('fl_' + key).value); return a ? label(a) : ''; };
+  function bindPicker(cfg) {
+    const q = el(cfg.q), list = el(cfg.list), picker = q.closest('.picker');
+    const current = () => { const a = get(cfg.get()); return a ? label(a) : ''; };
     q.addEventListener('focus', () => {
       q.select();
-      // con la selección actual (o vacío) se explora toda la lista; si ya hay texto distinto, se busca con él
-      showList(key, q.value === current() ? '' : q.value);
+      showList(cfg, q.value === current() ? '' : q.value);
       // en el celular, sube el campo para que la lista de resultados no quede tapada por el teclado ni por la barra inferior
       setTimeout(() => picker.scrollIntoView({ block: 'start', behavior: 'smooth' }), 120);
     });
-    q.addEventListener('input', () => showList(key, q.value));
+    q.addEventListener('input', () => showList(cfg, q.value));
     q.addEventListener('keydown', e => {
       if (e.key === 'Enter') { const f = list.querySelector('button'); if (f) f.click(); e.preventDefault(); }
       else if (e.key === 'Escape') q.blur();
       else if (e.key === 'ArrowDown') { const f = list.querySelector('button'); if (f) { f.focus(); e.preventDefault(); } }
     });
-    // navegación con flechas dentro de la lista
     list.addEventListener('keydown', e => {
       const btns = [...list.querySelectorAll('button')], i = btns.indexOf(document.activeElement);
       if (e.key === 'ArrowDown' && i >= 0) { (btns[i + 1] || btns[i]).focus(); e.preventDefault(); }
@@ -186,12 +147,36 @@
     }, 250);
     q.addEventListener('blur', leave);
     list.addEventListener('focusout', leave);
-    // mousedown en la lista no debe quitar el foco al campo (permite desplazar la lista con el mouse sin cerrarla)
     list.addEventListener('mousedown', e => { if (!e.target.closest('button')) e.preventDefault(); });
-    el(`fl_${key}_clear`).addEventListener('click', () => setAerodrome(key, '', false));
+    if (cfg.clear) el(cfg.clear).addEventListener('click', () => cfg.set(''));
   }
 
-  // ---------- paneles de pista (Performance > Salida / Llegada) ----------
+  // ---------- origen y destino (los fija la ruta) ----------
+  function setAerodrome(key, icao, restore) {
+    const a = get(icao);
+    el('fl_' + key).value = a ? a.i : '';
+    renderPanel(PANEL_OF[key], a, restore);
+    if (!restore) recalcNow();
+  }
+  // Origen y destino desde la ruta. undefined/null = sin cambio; '' = sin aeródromo (se limpia el panel).
+  function setEnds(from, to) {
+    const apply = (key, v) => { if (v === undefined || v === null) return; const id = v && get(v) ? v : ''; if (el('fl_' + key).value !== id) setAerodrome(key, id, false); };
+    apply('from', from); apply('to', to);
+  }
+
+  // ---------- alterno ----------
+  function setAlternate(icao, restore) {
+    const a = get(icao);
+    el('alt_icao').value = a ? a.i : '';
+    el('alt_q').value = a ? label(a) : '';
+    el('alt_list').replaceChildren();
+    el('alt_clear').hidden = !a;
+    const info = el('alt_info');
+    info.textContent = a ? [a.el != null ? 'Elev. ' + nf(a.el) + ' ft' : '', a.rw.map(r => r.a + (r.b ? '/' + r.b : '')).filter(Boolean).join(', '), a.lat == null ? '⚠ sin coordenadas: no se puede calcular' : ''].filter(Boolean).join(' · ') : '';
+    if (!restore) recalcNow();
+  }
+
+  // ---------- paneles de pista (Despegue y aterrizaje > Salida / Llegada) ----------
   function runwayOptions(p, a) {
     const sel = el(p + '_rwy');
     sel.replaceChildren();
@@ -218,8 +203,8 @@
     runwayOptions(p, a);
     const sel = el(p + '_rwy'), saved = el(cfg.saved).value;
     if (restore && saved && [...sel.options].some(o => o.value === saved)) sel.value = saved; else sel.selectedIndex = 0;
-    renderData(p, a);
-    if (restore) el(p + '_apply').textContent = 'Los datos del cálculo son los de la última vez. Usa «Cargar en el cálculo» para traerlos de nuevo desde la base.';
+    renderEssential(p, a);
+    if (restore) el(p + '_apply').textContent = 'Los datos de pista son los de la última vez; cámbialos a mano o elige otra pista para traerlos de nuevo del AIP.';
     else applyPanel(p);
   }
 
@@ -235,6 +220,18 @@
     });
     return [...g].map(([s, fs]) => `${SVN[s] || s}: ${fs.join(' · ')} MHz`).join('\n');
   }
+  // Las frecuencias que un piloto usa al salir o llegar, en una línea: «TWR 118,1 · GND 121,9 · ATIS 127,25»
+  const FQ_ORDER = ['TWR', 'GND', 'ATIS', 'APP', 'AFIS', 'TIBA', 'DLVRY'];
+  function freqShort(a, only) {
+    if (!a || !a.fq || !a.fq.length) return '';
+    const out = [];
+    FQ_ORDER.forEach(s => {
+      if (only && !only.includes(s)) return;
+      const fs = a.fq.filter(f => f[0] === s && !/EMERG/i.test(f[2] || '')).map(f => f[1]);
+      if (fs.length) out.push(`${s} ${fs.slice(0, 2).join(' / ')}`);
+    });
+    return out.join(' · ');
+  }
   function atzText(a) {
     const z = a.atz;
     if (!z) return '';
@@ -243,41 +240,85 @@
     return z.parcial ? `Forma parcial (semicírculo o con corte) de ${r} NM de radio${alt}. Lee la geometría exacta en las notas del AIP.` : `Radio ${r} NM${alt}`;
   }
 
-  function renderData(p, a) {
-    const dl = el(p + '_data');
+  const runwaysText = a => a.rw.map(r => `${r.a}${r.b ? '/' + r.b : ''}${r.l ? ' · ' + nf(r.l) + ' × ' + (r.w || '?') + ' m (' + nf(r.l * M_TO_FT) + ' ft)' : ' · largo sin dato'}`).join('\n');
+  const fill = (dl, rows) => {
     dl.replaceChildren();
-    const row = (k, v) => { if (v == null || v === '') return; dl.append(make('dt', k), make('dd', v)); };
-    row('Aeródromo', `${a.i} · ${a.n} (${a.t === 'AP' ? 'aeropuerto' : 'aeródromo'})`);
-    row('Ubicación', [a.c, a.r].filter(Boolean).join(', '));
-    if (a.lat != null && a.lon != null) row('Coordenadas', `${nf(Math.abs(a.lat), 4)}° ${a.lat < 0 ? 'S' : 'N'}, ${nf(Math.abs(a.lon), 4)}° ${a.lon < 0 ? 'W' : 'E'}`);
-    if (a.el != null) row('Elevación', `${nf(a.el)} ft (${nf(a.el * 0.3048)} m)`);
-    row('Pistas', a.rw.map(r => `${r.a}${r.b ? '/' + r.b : ''}${r.l ? ' · ' + nf(r.l) + ' × ' + (r.w || '?') + ' m (' + nf(r.l * M_TO_FT) + ' ft)' : ' · largo sin dato'}`).join('\n'));
-    row('Superficie', a.sf);
-    if (a.pc) row('Resistencia', /kg/i.test(a.pc) ? `Peso máx. de aeronave ${a.pc}` : a.pc);
-    if (a.lg) row('Iluminación', a.lg === 'NIL' ? 'Sin iluminación (NIL)' : a.lg);
-    row('Servicios', a.sv);
-    row('Frecuencias', freqText(a));
-    row('Radioayudas', (a.nv || []).map(n => `${n[0]}${n[1] ? ' ' + n[1] : ''} · ${n[2]} MHz`).join('\n'));
-    row('Zona de tránsito (ATZ)', atzText(a));
-    row('Horario', a.hr ? (HOURS[a.hr] || a.hr) : '');
-    row('Uso', USO[a.uso] || '');
-    row('Cómo llegar', a.loc);
-    row('Observaciones del AIP', a.ob);
-    row('Notas ENR 4.1 (horarios, ATZ/CTR)', a.nt);
-    row('Fuente', `AIP Chile Vol. I · ${a.src === 'AD 2' ? 'AD 2' : 'AD 3'} · vigencia ${META.vigencia || ''}`);
+    rows.forEach(([k, v]) => { if (v == null || v === '') return; dl.append(make('dt', k), make('dd', v)); });
     dl.querySelectorAll('dd').forEach(d => { d.style.whiteSpace = 'pre-line'; });
+  };
+  const warnBox = (box, list) => { box.replaceChildren(); list.forEach(([t, c]) => box.append(make('div', t, 'msg ' + c))); };
 
-    const w = el(p + '_warn');
-    w.replaceChildren();
-    const msg = (t, c) => w.append(make('div', t, 'msg ' + c));
-    (a.fix || []).forEach(t => msg(t, 'warn'));
-    if (a.ap) msg('El AIP marca estas coordenadas como aproximadas (*).', 'warn');
-    if (a.uso === 'PVT') msg('Aeródromo privado: pide autorización al administrador antes de operar.', 'warn');
-    if (a.uso === 'MIL') msg('Aeródromo militar: requiere autorización de la unidad.', 'warn');
-    if (!a.q) msg('Registro con campos incompletos o dudosos en la extracción automática. Verifica en el AIP antes de usarlo.', 'warn');
-    if (a.src === 'AD 2') msg('Aeropuerto con ficha AD 2: distancias declaradas, ATZ/CTR y procedimientos, consúltalos en el AIP.', 'warn');
-    if (!a.fq) msg('No figura en ENR 4.1 (sin torre, AFIS ni frecuencia TIBA publicados). Revisa las observaciones del AIP y la frecuencia de la zona antes de operar.', 'warn');
-    msg('El largo cargado es el largo físico de la pista. Para el cálculo usa las distancias declaradas (TORA/LDA) del AIP si son menores.', 'warn');
+  // Lo esencial de un aeródromo para Despegue y aterrizaje: dónde está, pistas, frecuencias y horario
+  function renderEssential(p, a) {
+    fill(el(p + '_data'), [
+      ['Elevación', a.el != null ? `${nf(a.el)} ft` : ''],
+      ['Pistas', runwaysText(a)],
+      ['Superficie', a.sf],
+      ['Frecuencias', freqShort(a)],
+      ['Horario', a.hr ? (((HOURS[a.hr] || a.hr).length <= 28) ? (HOURS[a.hr] || a.hr) : 'Con restricciones: míralo en «Ver todos los datos»') : '']
+    ]);
+    const w = [];
+    if (a.uso === 'PVT') w.push(['Aeródromo privado: pide autorización al administrador antes de operar.', 'warn']);
+    if (a.uso === 'MIL') w.push(['Aeródromo militar: requiere autorización de la unidad.', 'warn']);
+    if (!a.fq) w.push(['Sin torre, AFIS ni frecuencia publicados en ENR 4.1: revisa la frecuencia de la zona antes de operar.', 'warn']);
+    if (!a.q) w.push(['Datos incompletos o dudosos en la extracción automática: verifica en el AIP.', 'warn']);
+    w.push(['El largo es el físico de la pista. Si el AIP publica TORA/LDA menores, usa esos.', 'warn']);
+    warnBox(el(p + '_warn'), w);
+  }
+
+  // Ficha completa (Información adicional)
+  function renderFull(a) {
+    el('info_card').hidden = !a;
+    if (!a) return;
+    el('info_code').textContent = a.i;
+    el('info_name').textContent = a.n + (a.c ? ' · ' + a.c : '');
+    fill(el('info_data'), [
+      ['Aeródromo', `${a.i} · ${a.n} (${a.t === 'AP' ? 'aeropuerto' : 'aeródromo'})`],
+      ['Ubicación', [a.c, a.r].filter(Boolean).join(', ')],
+      ['Coordenadas', a.lat != null && a.lon != null ? `${nf(Math.abs(a.lat), 4)}° ${a.lat < 0 ? 'S' : 'N'}, ${nf(Math.abs(a.lon), 4)}° ${a.lon < 0 ? 'W' : 'E'}` : ''],
+      ['Elevación', a.el != null ? `${nf(a.el)} ft (${nf(a.el * 0.3048)} m)` : ''],
+      ['Pistas', runwaysText(a)],
+      ['Superficie', a.sf],
+      ['Resistencia', a.pc ? (/kg/i.test(a.pc) ? `Peso máx. de aeronave ${a.pc}` : a.pc) : ''],
+      ['Iluminación', a.lg ? (a.lg === 'NIL' ? 'Sin iluminación (NIL)' : a.lg) : ''],
+      ['Servicios', a.sv],
+      ['Frecuencias', freqText(a)],
+      ['Radioayudas', (a.nv || []).map(n => `${n[0]}${n[1] ? ' ' + n[1] : ''} · ${n[2]} MHz`).join('\n')],
+      ['Zona de tránsito (ATZ)', atzText(a)],
+      ['Horario', a.hr ? (HOURS[a.hr] || a.hr) : ''],
+      ['Uso', USO[a.uso] || ''],
+      ['Cómo llegar', a.loc],
+      ['Observaciones del AIP', a.ob],
+      ['Notas ENR 4.1 (horarios, ATZ/CTR)', a.nt],
+      ['Fuente', `AIP Chile Vol. I · ${a.src === 'AD 2' ? 'AD 2' : 'AD 3'} · vigencia ${META.vigencia || ''}`]
+    ]);
+    const w = [];
+    (a.fix || []).forEach(t => w.push([t, 'warn']));
+    if (a.ap) w.push(['El AIP marca estas coordenadas como aproximadas (*).', 'warn']);
+    if (a.uso === 'PVT') w.push(['Aeródromo privado: pide autorización al administrador antes de operar.', 'warn']);
+    if (a.uso === 'MIL') w.push(['Aeródromo militar: requiere autorización de la unidad.', 'warn']);
+    if (!a.q) w.push(['Registro con campos incompletos o dudosos en la extracción automática. Verifica en el AIP antes de usarlo.', 'warn']);
+    if (a.src === 'AD 2') w.push(['Aeropuerto con ficha AD 2: distancias declaradas, ATZ/CTR y procedimientos, consúltalos en el AIP.', 'warn']);
+    if (!a.fq) w.push(['No figura en ENR 4.1 (sin torre, AFIS ni frecuencia TIBA publicados). Revisa las observaciones del AIP y la frecuencia de la zona antes de operar.', 'warn']);
+    w.push(['El largo cargado es el largo físico de la pista. Para el cálculo usa las distancias declaradas (TORA/LDA) del AIP si son menores.', 'warn']);
+    warnBox(el('info_warn'), w);
+  }
+  // which = 'dep' | 'arr' | código ICAO
+  function showInfo(which) {
+    const icao = which === 'dep' ? el('fl_from').value : which === 'arr' ? el('fl_to').value : which;
+    const a = get(icao);
+    el('info_q').value = a ? label(a) : '';
+    el('info_list').replaceChildren();
+    renderFull(a);
+    renderChips(a ? a.i : '');
+  }
+  // Los aeródromos de la ruta (y el alterno) como atajos
+  function renderChips(active) {
+    const box = el('info_chips'); box.replaceChildren();
+    const pts = (window.MAPA && window.MAPA.route) ? window.MAPA.route() : [];
+    const ids = [...new Set([...pts.map(p => p.i).filter(Boolean), el('alt_icao').value].filter(Boolean))];
+    if (!ids.length) { box.append(make('p', 'Los aeródromos de tu ruta aparecen aquí como atajos.', 'hint nomargin')); return; }
+    ids.forEach(i => { const b = make('button', i, 'chipb' + (i === active ? ' on' : '')); b.type = 'button'; b.addEventListener('click', () => showInfo(i)); box.append(b); });
   }
 
   // Lleva elevación, pista, largo y superficie del aeródromo elegido a los campos de la calculadora
@@ -304,7 +345,7 @@
       el(cfg.surf).selectedIndex = 0;
       missing.push('superficie (revisa la corrección elegida)');
     }
-    el(p + '_apply').textContent = (done.length ? 'Cargado en el cálculo: ' + done.join(', ') + '.' : 'No había datos para cargar.')
+    el(p + '_apply').textContent = (done.length ? 'Cargado desde el AIP: ' + done.join(', ') + '.' : 'No había datos para cargar.')
       + (missing.length ? ' Sin dato: ' + missing.join(', ') + '. Complétalo a mano.' : '');
     el(cfg.saved).value = sel.value;
   }
@@ -312,7 +353,7 @@
   // ---------- arranque ----------
   let readyFns = [], isReady = false;
   const whenReady = fn => { if (isReady) fn(); else readyFns.push(fn); };
-  window.AD = { get, route, search: (q, n) => search(q, n).items, searchAll: search, browse, all: () => DB, freqText, setEnds, whenReady, alias: icao => ALIAS[icao] || '' };
+  window.AD = { get, route, search: (q, n) => search(q, n).items, searchAll: search, browse, all: () => DB, freqText, freqShort, setEnds, setAlternate, showInfo, whenReady, alias: icao => ALIAS[icao] || '' };
 
   async function init() {
     const status = el('ad_status');
@@ -322,20 +363,20 @@
       status.textContent = `${DB.length} aeródromos · AIP Chile Vol. I (vigencia ${data.vigencia}). Datos extraídos automáticamente: verifica con el AIP vigente.`;
     } catch (e) {
       status.textContent = 'No se pudo cargar la base de aeródromos. Abre la app desde su dirección web o usa la versión de archivo único.';
-      el('fl_from_q').disabled = true; el('fl_to_q').disabled = true;
+      el('alt_q').disabled = true; el('info_q').disabled = true;
       return;
     }
-    ['from', 'to'].forEach(bindPicker);
-    el('fl_swap').addEventListener('click', swap);
-    ['dep', 'arr'].forEach(p => {
-      el(p + '_rwy').addEventListener('change', () => { applyPanel(p); recalcNow(); });
-      el(p + '_load').addEventListener('click', () => { applyPanel(p); recalcNow(); });
-    });
+    bindPicker({ q: 'alt_q', list: 'alt_list', clear: 'alt_clear', get: () => el('alt_icao').value, set: i => setAlternate(i, false) });
+    bindPicker({ q: 'info_q', list: 'info_list', get: () => '', set: i => showInfo(i) });
+    ['dep', 'arr'].forEach(p => el(p + '_rwy').addEventListener('change', () => { applyPanel(p); recalcNow(); }));
+    document.addEventListener('c172:tab', e => { if (e.detail === 'info') renderChips(''); });
     // restaurar el vuelo anterior sin pisar los datos que ya estaban en la calculadora
     ['from', 'to'].forEach(key => {
       const v = el('fl_' + key).value;
       if (v && get(v)) setAerodrome(key, v, true); else el('fl_' + key).value = '';
     });
+    const alt = el('alt_icao').value;
+    if (alt && get(alt)) setAlternate(alt, true); else el('alt_icao').value = '';
     recalcNow();
     isReady = true; readyFns.forEach(fn => fn()); readyFns = [];
   }

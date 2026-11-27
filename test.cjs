@@ -1,24 +1,66 @@
 // Dependency-free regression checks for the calculation and rendering code.
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const html=fs.readFileSync(__dirname+'/index.html','utf8');
-const nodes=new Map();
-function node(id,value=''){return {id,value,min:'',max:'',hidden:false,disabled:false,dataset:{},classList:{contains:()=>false,toggle(){}},setAttribute(k,v){this[k]=v},removeAttribute(k){delete this[k]},addEventListener(k,v){(this.events??={})[k]=v},querySelector(){return node('child')},closest(q){const man=['r_tas','r_burn','r_climb'],poh=['r_alt','r_rpm','r_isa'];if(q!=='[hidden]')return null;return (man.includes(this.id)&&nodes.get('r_man_f').hidden)||(poh.includes(this.id)&&nodes.get('r_poh_f').hidden)?this:null},querySelectorAll(){return []},replaceChildren(){this.innerHTML=''},innerHTML:'',textContent:''};}
-for(const m of html.matchAll(/<(input|select|textarea|div|svg|button|span|b|small|p|table|tbody|td|section|em|label)[^>]*\bid="([^"]+)"[^>]*>/g)){
- const n=node(m[2],m[0].match(/\bvalue="([^"]*)"/)?.[1]||'');n.type=m[0].match(/\btype="([^"]*)"/)?.[1];
- n.min=m[0].match(/\bmin="([^"]*)"/)?.[1]??'';n.max=m[0].match(/\bmax="([^"]*)"/)?.[1]??'';
- if(m[1]==='textarea')n.value=html.slice(m.index+m[0].length).split('</textarea>')[0];
- if(m[1]==='select'){const body=html.slice(m.index+m[0].length).split('</select>')[0];n.value=body.match(/value="([^"]*)"[^>]*\bselected/)?.[1]??body.match(/value="([^"]*)"/)?.[1]??'';}
- let storedValue=n.value; Object.defineProperty(n,"value",{get(){return storedValue},set(v){storedValue=String(v)}}); nodes.set(n.id,n);
+
+// ---------------------------------------------------------------- DOM mínimo (suficiente para app.js)
+class Txt{constructor(v){this.v=String(v)}get textContent(){return this.v}get innerHTML(){return this.v}}
+class El{
+  constructor(tag,id=''){this.tag=tag;this.id=id;this.kids=[];this._html='';this._text='';this.className='';this.dataset={};this.style={};
+    this.hidden=false;this.disabled=false;this.min='';this.max='';this.type=undefined;this.attrs={};this.events={};this._cls=new Set();this._q=new Map();this._v='';this.cells=[];}
+  get value(){return this._v}set value(v){this._v=String(v)}
+  get classList(){const s=this._cls;return {add:c=>s.add(c),remove:c=>s.delete(c),toggle:(c,f)=>{(f===undefined?!s.has(c):f)?s.add(c):s.delete(c)},contains:c=>s.has(c)}}
+  append(...c){c.forEach(x=>this.kids.push(typeof x==='string'?new Txt(x):x))}
+  appendChild(c){this.kids.push(c);return c}
+  replaceChildren(...c){this.kids=[];this._html='';this._text='';this.append(...c)}
+  get innerHTML(){return this._html+this._text+this.kids.map(k=>k instanceof Txt?k.v:`<${k.tag}${k.className?` class="${k.className}"`:''}>${k.innerHTML}</${k.tag}>`).join('')}
+  set innerHTML(v){this.kids=[];this._text='';this._html=String(v)}
+  get textContent(){return this.innerHTML.replace(/<[^>]*>/g,'')}
+  set textContent(v){this.kids=[];this._html='';this._text=String(v)}
+  setAttribute(k,v){this.attrs[k]=String(v)}getAttribute(k){return this.attrs[k]??null}removeAttribute(k){delete this.attrs[k]}
+  addEventListener(k,f){this.events[k]=f}
+  querySelector(q){if(!this._q.has(q))this._q.set(q,new El('x'));return this._q.get(q)}
+  querySelectorAll(){return []}
+  closest(q){const man=['r_tas','r_burn','r_climb'],poh=['r_alt','r_rpm','r_isa','r_extra'];if(q!=='[hidden]')return null;return (man.includes(this.id)&&nodes.get('r_man_f').hidden)||(poh.includes(this.id)&&nodes.get('r_poh_f').hidden)?this:null}
 }
-const actions=new Map();
-const document={getElementById:id=>{assert(nodes.has(id),'missing DOM id '+id);return nodes.get(id)},querySelector:q=>{if(!actions.has(q))actions.set(q,node(q));return actions.get(q)},querySelectorAll:q=>q==='input[type="number"]'?[...nodes.values()].filter(n=>n.type==='number'):[],addEventListener(){},body:{dataset:{}}};
-const ctx=vm.createContext({document,window:{scrollTo(){}},localStorage:{getItem:()=>null,setItem(){}},console});
-vm.runInContext(fs.readFileSync(__dirname+'/modelos.js','utf8'),ctx);
-vm.runInContext(fs.readFileSync(__dirname+'/app.js','utf8'),ctx);
+const nodes=new Map();
+for(const m of html.matchAll(/<([a-z0-9]+)\b[^>]*\bid="([^"]+)"[^>]*>/g)){
+  const n=new El(m[1],m[2]);n.type=m[0].match(/\btype="([^"]*)"/)?.[1];
+  n.min=m[0].match(/\bmin="([^"]*)"/)?.[1]??'';n.max=m[0].match(/\bmax="([^"]*)"/)?.[1]??'';
+  n.hidden=/\shidden[\s>]/.test(m[0]);
+  let v=m[0].match(/\bvalue="([^"]*)"/)?.[1]||'';
+  if(m[1]==='textarea')v=html.slice(m.index+m[0].length).split('</textarea>')[0];
+  if(m[1]==='select'){const body=html.slice(m.index+m[0].length).split('</select>')[0];v=body.match(/value="([^"]*)"[^>]*\bselected/)?.[1]??body.match(/value="([^"]*)"/)?.[1]??'';}
+  n.value=v;nodes.set(n.id,n);
+}
+const doc={
+  getElementById:id=>{assert(nodes.has(id),'missing DOM id '+id);return nodes.get(id)},
+  createElement:t=>new El(t),
+  querySelector:()=>new El('x'),
+  querySelectorAll:q=>q==='input[type="number"]'?[...nodes.values()].filter(n=>n.type==='number'):[],
+  addEventListener(){},dispatchEvent(){},body:{dataset:{}}
+};
+class CustomEvent{constructor(t,o){this.type=t;this.detail=o&&o.detail}}
+const g={document:doc,localStorage:{getItem:()=>null,setItem(){}},console,CustomEvent,scrollTo(){}};
+g.window=g;
+const ctx=vm.createContext(g);
+const load=f=>vm.runInContext(fs.readFileSync(__dirname+'/'+f,'utf8'),ctx);
+load('modelos.js');load('ruta.js');
+// la ruta (mapa.js) y el viento por tramo (viaje.js) se simulan: aquí se prueba el cálculo, no el mapa
+const ROUTE={pts:[]},WIND={fn:()=>null};
+g.MAPA={route:()=>ROUTE.pts,shown(){}};
+g.VIAJE={windOf:(p,q)=>WIND.fn(p,q)};
+load('app.js');
 const run=code=>vm.runInContext(code,ctx);
 const set=(id,v)=>nodes.get(id).value=String(v);
 const near=(a,b,tol,msg)=>assert(Math.abs(a-b)<=tol,(msg||'')+` esperado ${b}, obtenido ${a}`);
-const pick=id=>nodes.get('model_list').events.click({target:{closest:()=>({dataset:{model:id}})}});
+const pick=id=>{set('fl_model',id);nodes.get('fl_model').events.change()};
+const text=id=>nodes.get(id).textContent;
+const SCTB={lat:-33.45694,lon:-70.54722,i:'SCTB',n:'Eulogio Sánchez'},SCRG={lat:-34.17322,lon:-70.77569,i:'SCRG'},SCSE={lat:-29.91639,lon:-71.19944,i:'SCSE'},SCCI={lat:-53.0026,lon:-70.8546,i:'SCCI'};
+const pill=id=>({cls:nodes.get(id).querySelector('.dot').className.replace('dot ',''),txt:nodes.get(id).querySelector('small').textContent});
+
+// el peso de despegue sale de Carga: para probar la performance a un peso dado se ajusta el peso vacío (en la unidad que esté activa)
+const towTo=w=>{run('recalc()');set('w_empty',+nodes.get('w_empty').value+(w-run('TOW'))/run('wf'));run('recalc()');near(run('TOW'),w,1e-6,'peso de despegue ajustado')};
+
 
 // ---------------------------------------------------------------- integridad de las tablas del POH
 const MODELS=JSON.parse(JSON.stringify(run('MODELS')));
@@ -78,62 +120,145 @@ assert(look('c172s','to',0,41,2550).out,'OAT > 40 °C: fuera de tabla');
 const nullCell=(()=>{for(const [id,m] of Object.entries(MODELS))for(const kind of ['to','ld'])for(const s of m.perf[kind].sheets)for(let i=0;i<9;i++)for(let j=0;j<5;j++)if(s.rows[i][2*j]===null)return {id,kind,w:s.w,pa:i*1000,oat:j*10};return null})();
 if(nullCell){r=look(nullCell.id,nullCell.kind,nullCell.pa,nullCell.oat,nullCell.w);assert(r.out&&/Sin dato/.test(r.out),'celda "---" => sin dato, no un número inventado');}
 
-// ---------------------------------------------------------------- flujo completo con el 172S por defecto
+
+// ---------------------------------------------------------------- estado inicial: 172S, todavía sin ruta
 assert.equal(run('MODEL.id'),'c172s');
 assert.equal(nodes.get('w_empty').value,'1642');assert.equal(nodes.get('a_empty').value,'38.12');
 assert.equal(run('validateInputs()'),true);
-assert(Number.isFinite(run('fuelNeeded')));
-const need=run('fuelNeeded');nodes.get('fuel_apply').events.click();
-assert(+nodes.get('f_gal').value>=need && +nodes.get('f_gal').value<need+.101,'apply total once');
-set('r_mode','man');run('recalc()');
-set('r_burn',0);run('recalc()');assert.equal(nodes.get('fuel_apply').disabled,true);assert.equal(nodes.get('fuel_out').innerHTML,'');
-set('r_burn',8.5);set('r_wind',105);run('recalc()');assert.equal(run('validateInputs()'),false);
-set('r_wind',0);set('w_front',-1);run('recalc()');assert.equal(run('validateInputs()'),false);
-set('w_front',340);set('qnh','');run('recalc()');assert.equal(run('validateInputs()'),false);set('qnh',1013);
-set('r_dist',10000);run('recalc()');assert.equal(nodes.get('fuel_apply').disabled,true);set('r_dist',120);set('r_mode','poh');run('recalc()');
-set('f_gal',.5);run('recalc()');assert.equal(run('SUM.wb.ok'),false);set('f_gal',40);
-set('u_w','kg');set('u_f','L');run('onUnitChange()');assert.equal(run('validateInputs()'),true);nodes.get('fuel_apply').events.click();assert(run("num('f_gal') * ff + 1e-9 >= fuelNeeded"));assert(run("num('f_gal') * ff <= LIM.fuelMax"));
-assert(!/NaN|Infinity/.test(nodes.get('to_fig').innerHTML));
+assert(/Todavía no hay ruta/.test(text('fuel_verdict')),'sin ruta: el veredicto lo dice');
+assert.equal(nodes.get('fuel_apply').disabled,true);assert.equal(pill('st_fuel').cls,'off');assert.equal(text('chip'),'Sin ruta');
 
-const reset = () => { set('u_w','lb'); set('u_f','gal'); run('onUnitChange()'); };
-reset();
-set('w_front',340); set('w_rear',0); set('f_gal',40); set('a_empty','38.12'); set('qnh',1013); set('r_dist',120); set('r_wind',0); set('r_burn',8.5); set('r_mode','poh'); run('recalc()');
-assert.equal(run('validateInputs()'), true, 'estado base válido');
-// Campos opcionales en blanco valen 0 (sin pasajeros atrás, sin equipaje, sin viento)
-set('w_rear',''); set('w_bagA',''); set('wspd',''); set('r_climb',''); run('recalc()');
-assert.equal(run('validateInputs()'), true, 'campos opcionales en blanco');
-set('w_rear',0); set('w_bagA',0); set('wspd',0); set('r_climb',1.5);
-// Pista y dirección del viento: solo obligatorias si hay viento
-set('rwy',''); set('wdir',''); set('wspd',0); run('recalc()'); assert.equal(run('validateInputs()'), true, 'sin viento no exige pista');
-set('wspd',10); run('recalc()'); assert.equal(run('validateInputs()'), false, 'con viento exige pista y dirección');
-set('rwy',27); set('wdir',270); run('recalc()'); assert.equal(run('validateInputs()'), true); set('wspd',0);
-// Campos obligatorios en blanco, y errores de tipeo fuera de rango
-set('elev',''); run('recalc()'); assert.equal(run('validateInputs()'), false, 'elevación en blanco');
-assert(/elev/i.test(nodes.get('validation').textContent), 'el aviso nombra el campo');
-set('elev',0);
-set('qnh',10013); run('recalc()'); assert.equal(run('validateInputs()'), false, 'QNH 10013'); set('qnh',1013);
-set('oat',150); run('recalc()'); assert.equal(run('validateInputs()'), false, 'OAT 150 °C'); set('oat',15);
-// Al suspender se limpian resumen y salidas; al corregir vuelven
-set('qnh',''); run('recalc()');
-assert.equal(run('SUM.wb'), null); assert.equal(nodes.get('to_out').innerHTML, ''); assert.equal(nodes.get('to_notes').innerHTML, ''); assert.equal(nodes.get('validation').hidden, false);
-set('qnh',1013); run('recalc()');
-assert.notEqual(run('SUM.wb'), null); assert.notEqual(nodes.get('to_out').innerHTML, ''); assert.equal(nodes.get('validation').hidden, true);
-// Combustible: sin doble conteo del rodaje y sin pasar del tanque
-run('recalc()'); const need2 = run('fuelNeeded'); nodes.get('fuel_apply').events.click();
-const loaded = +nodes.get('f_gal').value;
-assert(loaded >= need2 - 1e-9 && loaded < need2 + 0.1 + 1e-9, 'carga = necesario redondeado al 0,1 (' + loaded + ' vs ' + need2 + ')');
-assert(run("SUM.fuel.have + 1e-9 >= SUM.fuel.need"), 'tras aplicar, el resumen no marca falta de combustible');
-// Avisos de peso y balance
-set('f_gal',1); run('recalc()'); assert(/rodaje/.test(nodes.get('wb_msgs').innerHTML), 'aviso de rodaje'); assert.equal(run('SUM.wb.ok'), false);
-set('f_gal',40); set('a_empty',28); run('recalc()'); assert(/consumir el combustible/.test(nodes.get('wb_msgs').innerHTML), 'aviso de CG sin combustible'); set('a_empty','38.12');
-// kg / L: ida y vuelta sin deriva y cargas válidas
-for (let i = 0; i < 4; i++) { set('u_w','kg'); set('u_f','L'); run('onUnitChange()'); set('u_w','lb'); set('u_f','gal'); run('onUnitChange()'); }
-assert.equal(nodes.get('w_empty').value, '1642'); assert.equal(nodes.get('f_gal').value, '40'); assert.equal(run('validateInputs()'), true);
+// ---------------------------------------------------------------- combustible de punta a punta con la ruta cargada (172S, tablas del POH)
+ROUTE.pts=[SCTB,SCRG,SCSE];
+set('r_mode','poh');set('r_alt',6000);set('r_rpm',2500);set('r_isa',0);set('r_extra',0);set('r_res',30);set('r_taxi',1.4);set('f_gal',40);set('elev',0);set('qnh',1013.25);
+run('recalc()');
+assert.equal(text('chip'),'SCTB → SCSE (+1)');
+{
+  const T=run('TRIP');assert(!T.err&&!T.none);
+  near(T.pl.nm,301,3,'SCTB → SCRG → SCSE ≈ 301 NM');assert.equal(T.pl.legs.length,2);
+  // 6000 ft / 2500 RPM / ISA => 65 % · 114 kt · 9,0 gal/h; ascenso 10 min · 2,2 gal · 13 NM; sin viento
+  near(T.total,1.4+2.2+(T.pl.nm-13)/114*9.0+4.5,1e-6,'total = rodaje + ascenso + crucero + reserva');
+  near(T.pl.legs[1].gs,114,1e-9,'sin viento: velocidad suelo = TAS');
+  near(T.pl.legs[0].min,10+(44.4-13)/114*60,1.5,'primer tramo: ascenso + crucero');
+  assert(/Sin datos de viento/.test(text('fuel_verdict')),'sin viento cargado, el aviso lo dice');
+  assert(/El combustible alcanza/.test(text('fuel_verdict'))&&/Aterrizas con/.test(text('fuel_verdict')));
+  assert.equal(pill('st_fuel').cls,'ok');assert(/Sobran/.test(pill('st_fuel').txt));
+  const tb=text('fuel_tbl');
+  assert(/Rodaje \+ despegue/.test(tb)&&/1\. SCTB → SCRG/.test(tb)&&/2\. SCRG → SCSE/.test(tb)&&/Reserva/.test(tb)&&/Total/.test(tb)&&/con ascenso/.test(tb),'tabla por tramo');
+  assert(!/NaN|Infinity|undefined/.test(nodes.get('fuel_tbl').innerHTML+nodes.get('fuel_out').innerHTML));
+  // veredicto: con poco combustible dice que NO alcanza y cuánto falta
+  set('f_gal',20);run('recalc()');
+  const L=run('TRIP');
+  assert(L.short&&/NO alcanza/.test(text('fuel_verdict'))&&/faltan/.test(text('fuel_verdict')));
+  near(L.reach,13+(20-1.4-4.5-2.2)/9.0*114,0.01,'alcance con lo cargado, sin tocar la reserva');
+  assert.equal(pill('st_fuel').cls,'bad');assert(/Faltan/.test(pill('st_fuel').txt));assert.equal(nodes.get('fuel_apply').disabled,false);
+  assert(/−/.test(text('fuel_tbl')),'la tabla muestra dónde se acaba el combustible (queda negativo)');
+  // «Cargar el combustible necesario»: redondea hacia arriba al 0,1 y deja el veredicto en verde
+  nodes.get('fuel_apply').events.click();
+  const loaded=+nodes.get('f_gal').value,need=run('TRIP').total;
+  assert(loaded>=need-1e-9&&loaded<need+0.101,`carga = necesario redondeado al 0,1 (${loaded} vs ${need})`);
+  assert(/El combustible alcanza/.test(text('fuel_verdict'))&&run('TRIP.short')===false);
+  assert.equal(run('SUM.wb.ok'),true);
+}
+set('f_gal',40);run('recalc()');
 
-// ---------------------------------------------------------------- despegue/aterrizaje con las tablas del POH, de punta a punta
-// QNH 1013,25 hPa y elevación 0 => altitud presión exactamente 0; 2400 lb es una hoja del POH; 15 °C = entre las columnas de 10 y 20 °C
-set('elev',0);set('qnh',1013.25);set('oat',15);set('to_w',2400);set('to_surf',1);set('wspd',0);set('to_len',3000);run('recalc()');
-assert.equal(run('validateInputs()'),true);
+// ---------------------------------------------------------------- el viento de cada tramo cambia el combustible
+{
+  const base=run('TRIP').total;
+  WIND.fn=(p,q)=>({dir:q===SCRG?195:355,spd:30});run('recalc()');            // de frente en los dos tramos (rumbos 195° y 355°)
+  let T=run('TRIP');near(T.pl.legs[1].gs,84,0.5,'viento de frente de 30 kt: 114 − 30');assert(T.total>base+3,'con viento de frente se gasta más');
+  assert(!/Sin datos de viento/.test(text('fuel_verdict')));assert(/viento 355° 30 kt/.test(text('fuel_tbl')),'la tabla muestra el viento de cada tramo');
+  WIND.fn=(p,q)=>({dir:q===SCRG?15:175,spd:30});run('recalc()');             // de cola
+  T=run('TRIP');near(T.pl.legs[1].gs,144,0.5,'viento de cola de 30 kt');assert(T.total<base-3,'con viento de cola se gasta menos');
+  WIND.fn=(p,q)=>(p===SCTB?{dir:195,spd:10}:null);run('recalc()');
+  assert(/Falta el viento de algún tramo/.test(text('fuel_verdict')),'viento en un solo tramo: avisa');
+  WIND.fn=()=>({dir:270,spd:10,stale:true});run('recalc()');
+  assert(/pronóstico viejo/.test(text('fuel_verdict')),'viento desactualizado: avisa');
+  WIND.fn=()=>({dir:285,spd:200});run('recalc()');                           // viento de costado mayor que la TAS: no hay avance
+  assert(run('TRIP.err')&&/no hay avance/.test(text('fuel_verdict'))&&/No se puede calcular/.test(text('fuel_verdict')));assert.equal(nodes.get('fuel_apply').disabled,true);assert.equal(pill('st_fuel').cls,'bad');
+  WIND.fn=()=>null;run('recalc()');near(run('TRIP.total'),base,1e-9);
+}
+
+// ---------------------------------------------------------------- alterno, tanque y ruta imposible
+{
+  const base=run('TRIP').total;
+  g.AD={get:id=>id==='SCXX'?{i:'SCXX',n:'Alterno de prueba',lat:-30.6,lon:-71.2}:id==='SCSE'?{...SCSE,n:'La Florida'}:null};
+  set('alt_icao','SCXX');run('recalc()');
+  let T=run('TRIP');assert(T.alt&&T.galAlt>2&&T.galAlt<5,'alterno a ~40 NM del destino: '+T.galAlt);near(T.total,base+T.galAlt,1e-9);assert(/Alterno SCXX/.test(text('fuel_tbl')));
+  set('alt_icao','SCSE');run('recalc()');assert.equal(run('TRIP.alt'),null,'el alterno no puede ser el destino');
+  set('alt_icao','');
+  ROUTE.pts=[SCTB,SCCI];run('recalc()');                                      // ~1.100 NM: más que el tanque
+  T=run('TRIP');assert(T.over&&/No llegas sin escala/.test(text('fuel_verdict')));assert.equal(nodes.get('fuel_apply').disabled,true);assert.equal(pill('st_fuel').txt,'No llegas');
+  ROUTE.pts=[SCTB];run('recalc()');assert(/Todavía no hay ruta/.test(text('fuel_verdict')),'un solo punto no es una ruta');
+  ROUTE.pts=[SCTB,SCRG,SCSE];run('recalc()');
+}
+
+// ---------------------------------------------------------------- consumo extra, ISA, fuera de tabla y modo manual
+{
+  const nm=run('TRIP.pl.nm');
+  set('r_extra',10);run('recalc()');near(run('TRIP.total'),1.4+2.2*1.1+(nm-13)/114*9.9+0.5*9.9,1e-6,'+10 % de consumo sobre el POH (práctica, no valor del POH)');set('r_extra',0);
+  // +20 °C sobre ISA: columna ISA+20 del POH (112 kt, 8,5 gal/h a 6000 ft y 2500 RPM) y ascenso +20 %
+  set('r_isa',20);run('recalc()');{const tas=112,gph=8.5,cm=13*1.2;near(run('TRIP.total'),1.4+2.2*1.2+(nm-cm)/tas*gph+0.5*gph,1e-6,'ISA+20');}set('r_isa',0);
+  // reserva de 45 min
+  set('r_res',45);run('recalc()');near(run('TRIP.total'),1.4+2.2+(nm-13)/114*9.0+0.75*9.0,1e-6);set('r_res',30);
+  // fuera de la tabla del POH: mensaje claro y ningún número inventado
+  set('r_alt',1500);run('recalc()');assert(run('TRIP.err')&&/2\.?000/.test(text('fuel_verdict')));assert.equal(nodes.get('fuel_tbl').innerHTML,'');assert.equal(nodes.get('fuel_apply').disabled,true);
+  set('r_alt',6000);set('r_rpm',3000);run('recalc()');assert(run('TRIP.err')&&/RPM/.test(text('fuel_verdict')));set('r_rpm',2500);
+  // modo manual: TAS, consumo y ascenso propios; los campos del POH ocultos no se validan
+  set('r_mode','man');set('r_tas',105);set('r_burn',8.5);set('r_climb',1.5);set('r_alt','');set('r_rpm','');run('recalc()');
+  assert.equal(run('validateInputs()'),true,'manual: los campos del POH ocultos no invalidan');
+  near(run('TRIP.total'),1.4+1.5+nm/105*8.5+4.25,1e-9,'manual: TAS, consumo y ascenso propios');
+  set('r_burn',0);run('recalc()');assert.equal(run('validateInputs()'),false);assert.equal(nodes.get('fuel_apply').disabled,true);assert.equal(nodes.get('fuel_verdict').innerHTML,'');
+  set('r_burn',8.5);
+  WIND.fn=()=>({dir:300,spd:200});run('recalc()');assert(run('TRIP.err'),'manual: viento mayor que la TAS');WIND.fn=()=>null;
+  set('r_mode','poh');set('r_alt',6000);set('r_rpm',2500);run('recalc()');assert.equal(run('validateInputs()'),true);assert(!run('TRIP.err'));
+}
+
+// ---------------------------------------------------------------- validaciones y avisos de peso y balance
+{
+  const reset=()=>{set('u_w','lb');set('u_f','gal');run('onUnitChange()')};
+  reset();
+  set('w_front',340);set('w_rear',0);set('f_gal',40);set('a_empty','38.12');set('qnh',1013);set('elev',0);run('recalc()');
+  assert.equal(run('validateInputs()'),true,'estado base válido');
+  set('w_front',-1);run('recalc()');assert.equal(run('validateInputs()'),false);set('w_front',340);
+  set('qnh','');run('recalc()');assert.equal(run('validateInputs()'),false);set('qnh',1013);
+  // campos opcionales en blanco valen 0 (sin pasajeros atrás, sin equipaje, sin viento)
+  set('w_rear','');set('w_bagA','');set('wspd','');set('r_climb','');run('recalc()');assert.equal(run('validateInputs()'),true,'campos opcionales en blanco');
+  set('w_rear',0);set('w_bagA',0);set('wspd',0);set('r_climb',1.5);
+  // pista y dirección del viento: solo obligatorias si hay viento
+  set('rwy','');set('wdir','');set('wspd',0);run('recalc()');assert.equal(run('validateInputs()'),true,'sin viento no exige pista');
+  set('wspd',10);run('recalc()');assert.equal(run('validateInputs()'),false,'con viento exige pista y dirección');
+  set('rwy',27);set('wdir',270);run('recalc()');assert.equal(run('validateInputs()'),true);set('wspd',0);
+  // campos obligatorios en blanco y errores de tipeo fuera de rango
+  set('elev','');run('recalc()');assert.equal(run('validateInputs()'),false,'elevación en blanco');assert(/elev/i.test(text('validation')),'el aviso nombra el campo');set('elev',0);
+  set('qnh',10013);run('recalc()');assert.equal(run('validateInputs()'),false,'QNH 10013');set('qnh',1013);
+  set('oat',150);run('recalc()');assert.equal(run('validateInputs()'),false,'OAT 150 °C');set('oat',15);
+  // al suspender se limpian resumen y salidas (también el veredicto: mejor nada que un número falso); al corregir vuelven
+  set('qnh','');run('recalc()');
+  assert.equal(run('SUM.wb'),null);assert.equal(nodes.get('to_out').innerHTML,'');assert.equal(nodes.get('fuel_verdict').innerHTML,'');assert.equal(nodes.get('validation').hidden,false);assert.equal(pill('st_fuel').cls,'warn');
+  set('qnh',1013);run('recalc()');
+  assert.notEqual(run('SUM.wb'),null);assert.notEqual(nodes.get('to_out').innerHTML,'');assert.notEqual(nodes.get('fuel_verdict').innerHTML,'');assert.equal(nodes.get('validation').hidden,true);
+  // avisos de peso y balance
+  set('f_gal',1);run('recalc()');assert(/rodaje/.test(nodes.get('wb_msgs').innerHTML),'aviso de rodaje');assert.equal(run('SUM.wb.ok'),false);assert.equal(pill('st_wb').cls,'bad');
+  set('f_gal',40);set('a_empty',28);run('recalc()');assert(/consumir el combustible/.test(nodes.get('wb_msgs').innerHTML),'aviso de CG sin combustible');set('a_empty','38.12');
+  set('f_gal',60);run('recalc()');assert(/supera los/.test(nodes.get('wb_msgs').innerHTML),'combustible sobre el tanque');set('f_gal',40);run('recalc()');
+  // los pesos de Pista salen de Carga: despegue = rampa − rodaje; aterrizaje = despegue − combustible de la ruta
+  const TOW=run('TOW'),en=run('enrouteFuel');
+  near(+nodes.get('to_w').value,TOW,0.51);near(+nodes.get('ld_w').value,TOW-en*6,0.51);assert(en>20,'combustible de la ruta: '+en);
+  // kg / L: ida y vuelta sin deriva, cargas válidas y «Cargar el combustible necesario» en litros
+  for(let i=0;i<4;i++){set('u_w','kg');set('u_f','L');run('onUnitChange()');set('u_w','lb');set('u_f','gal');run('onUnitChange()');}
+  assert.equal(nodes.get('w_empty').value,'1642');assert.equal(nodes.get('f_gal').value,'40');assert.equal(run('validateInputs()'),true);
+  set('u_w','kg');set('u_f','L');run('onUnitChange()');assert.equal(run('validateInputs()'),true);set('f_gal',20);run('recalc()');
+  nodes.get('fuel_apply').events.click();
+  assert(run("num('f_gal') * ff + 1e-9 >= TRIP.total"),'litros: alcanza');assert(run("num('f_gal') * ff <= LIM.fuelMax"));assert(/L/.test(text('fuel_verdict')));
+  reset();set('f_gal',40);run('recalc()');
+}
+
+// ---------------------------------------------------------------- despegue/aterrizaje con las tablas del POH, de punta a punta (sin ruta: aterrizaje al peso de despegue)
+ROUTE.pts=[];
+set('elev',0);set('qnh',1013.25);set('oat',15);set('to_surf',1);set('wspd',0);set('wdir',270);set('rwy',27);set('to_len',3000);run('recalc()');
+// QNH 1013,25 hPa y elevación 0 => altitud presión 0; 2400 lb es una hoja del POH; 15 °C = entre las columnas de 10 y 20 °C
+towTo(2400);assert.equal(run('validateInputs()'),true);
 near(run('SUM.to.need'),1.25*((1370+1470)/2),1e-6,'despegue 2400 lb SL 15 °C = interpolación 10/20 °C del POH');
 assert(/830/.test(nodes.get('to_out').innerHTML)&&/1\.?420/.test(nodes.get('to_out').innerHTML),'se muestran 830 / 1420 ft');
 assert(/48 \/ 54 KIAS/.test(nodes.get('to_out').innerHTML),'velocidades de la hoja de 2400 lb');
@@ -143,31 +268,34 @@ set('wspd',9);run('recalc()');near(run('SUM.to.need'),1.25*1420*0.9,1e-6,'viento
 set('wspd',0);set('to_surf',1.15);run('recalc()');near(run('SUM.to.need'),1.25*(1420+0.15*830),1e-6,'hierba seca');set('to_surf',1);
 // viento de cola de más de 10 kt: el POH no lo cubre
 set('wspd',12);set('wdir',90);run('recalc()');assert(/cola de más de 10 kt/.test(nodes.get('to_notes').innerHTML));set('wspd',0);set('wdir',270);
-// peso: sobre el MTOW avisa
-set('to_w',2600);run('recalc()');assert(/Sobrepeso/.test(nodes.get('to_out').innerHTML));assert(/sobre el máximo/.test(nodes.get('to_notes').innerHTML));set('to_w',2400);
+// peso: sobre el MTOW avisa; bajo la hoja más liviana usa esa y avisa
+towTo(2600);assert(/Sobrepeso/.test(nodes.get('to_out').innerHTML));assert(/sobre el máximo/.test(nodes.get('to_notes').innerHTML));assert.equal(pill('st_wb').cls,'bad');
+towTo(2000);assert(/más liviana/.test(nodes.get('to_notes').innerHTML));
 // aterrizaje (hoja única al peso máximo): sin corrección por peso, con aviso
-set('a_elev',0);set('a_qnh',1013.25);set('a_oat',15);set('ld_w',2190);set('ld_surf',1);set('a_wspd',0);set('ld_len',3000);run('recalc()');
+set('a_elev',0);set('a_qnh',1013.25);set('a_oat',15);set('ld_surf',1);set('a_wspd',0);set('a_wdir',270);set('a_rwy',27);set('ld_len',3000);towTo(2400);
 near(run('SUM.ld.need'),1.25*((1320+1350)/2),1e-6,'aterrizaje SL 15 °C = interpolación 10/20 °C del POH');
 assert(/solo para/.test(nodes.get('ld_notes').innerHTML),'avisa que el POH publica una sola hoja de aterrizaje');
-set('ld_w',2600);run('recalc()');assert(/Sobre peso máx\. de aterrizaje/.test(nodes.get('ld_out').innerHTML));set('ld_w',2190);
+towTo(2600);assert(/Sobre peso máx\. de aterrizaje/.test(nodes.get('ld_out').innerHTML));towTo(2400);
 // fuera de tabla: altitud presión > 8000 ft => sin número, con mensaje; el resto sigue funcionando
 set('elev',9000);run('recalc()');
 assert.equal(run('validateInputs()'),true);assert(run('SUM.to.out'),'resumen: sin dato');assert(/Sin dato del POH/.test(nodes.get('to_out').innerHTML));assert.equal(nodes.get('to_fig').innerHTML,'');
-assert(/Fuera del rango/.test(nodes.get('to_notes').innerHTML));assert(/Fuera del rango/.test(run('fitText(SUM.to)')));
+assert(/Fuera del rango/.test(nodes.get('to_notes').innerHTML));assert.equal(run('SUM.to.ok'),'bad');
 assert.notEqual(run('SUM.wb'),null);assert.notEqual(nodes.get('ld_fig').innerHTML,'');
 set('elev',0);set('oat',45);run('recalc()');assert(run('SUM.to.out'),'OAT 45 °C: fuera de tabla');set('oat',15);run('recalc()');assert.equal(run('SUM.to.out'),undefined);
-
+// la pista corta se marca en el resumen de arriba
+assert.equal(pill('st_rwy').txt,'Sin ruta');assert.equal(pill('st_rwy').cls,'off');
+ROUTE.pts=[SCTB,SCRG,SCSE];set('to_len',900);run('recalc()');assert.equal(run('SUM.to.ok'),'bad');assert.equal(pill('st_rwy').cls,'bad');assert(/No cabe/.test(pill('st_rwy').txt));set('to_len',3000);run('recalc()');assert.equal(pill('st_rwy').cls,'ok');ROUTE.pts=[];run('recalc()');
 
 // ---------------------------------------------------------------- margen de seguridad seleccionable
-set('elev',0);set('qnh',1013.25);set('oat',15);set('to_w',2400);set('to_surf',1);set('wspd',0);set('to_len',3000);set('wdir',270);
+set('elev',0);set('qnh',1013.25);set('oat',15);set('to_surf',1);set('wspd',0);set('to_len',3000);set('wdir',270);towTo(2400);
 assert.equal(nodes.get('p_margin').value,'25','margen por defecto 25 %');
 for(const [m,k] of [[0,1],[10,1.1],[15,1.15],[25,1.25],[50,1.5]]){
   set('p_margin',m);run('recalc()');
   near(run('SUM.to.need'),k*1420,1e-6,'margen '+m+' %');near(run('SUM.ld.need'),k*1335,1e-6,'margen aterrizaje '+m+' %');
   assert(m===0?/Sin margen/.test(nodes.get('to_out').innerHTML)&&/Necesario/.test(nodes.get('to_fig').innerHTML):new RegExp('Con margen '+m+' %').test(nodes.get('to_out').innerHTML)&&new RegExp('\\+'+m+' %').test(nodes.get('to_fig').innerHTML),'rótulos del margen '+m);
 }
-set('p_margin',0);run('recalc()');assert(/Cabe según el POH/.test(run('fitText(SUM.to)')),'sin margen: texto del resumen');
-set('p_margin',25);run('recalc()');assert(/Con margen del 25 %/.test(run('fitText(SUM.to)')));
+set('p_margin',25);run('recalc()');
+
 
 // ---------------------------------------------------------------- crucero y ascenso del POH
 const cr=(model,pa,rpm,dev)=>JSON.parse(run('(()=>{const keep=MODEL;MODEL=MODELS.'+model+';try{return JSON.stringify(cruiseAt('+pa+','+rpm+','+dev+'))}finally{MODEL=keep}})()'));
@@ -205,80 +333,82 @@ c=cl('c172s',8000,6000,0);assert.deepEqual([c.min,c.gal,c.nm],[0,0,0],'cruzar m�
 assert(cl('c172s',0,13000,0).out,'ascenso sobre 12.000 ft: fuera de tabla');
 c=cl('c172s',-500,500,0);near(c.min,0.5,1e-9,'altitud de salida bajo el mar se trata como nivel del mar');
 
-// ---------------------------------------------------------------- planificador de ruta de punta a punta (172S, tablas del POH)
-set('r_mode','poh');set('r_alt',6000);set('r_rpm',2500);set('r_isa',0);set('r_dist',120);set('r_wind',0);set('r_res',30);set('r_taxi',1.4);set('f_gal',40);set('elev',0);set('qnh',1013.25);
-run('recalc()');
-// 6000 ft / 2500 RPM / ISA => 65 % · 114 kt · 9,0 gal/h; ascenso 10 min · 2,2 gal · 13 NM
-let hrsC=(120-13)/114;
-near(run('fuelNeeded'),1.4+2.2+hrsC*9.0+4.5,1e-9,'total = rodaje + ascenso + crucero + reserva');near(run('PLAN.hours'),10/60+hrsC,1e-9,'tiempo = ascenso + crucero');near(run('PLAN.gs'),114,1e-9);
-near(run('enrouteFuel'),2.2+hrsC*9.0,1e-9);
-assert(/Alcanza/.test(nodes.get('fuel_msg').innerHTML)&&/Ascenso/.test(nodes.get('fuel_tbl').innerHTML)&&/a 6.?000 ft/.test(nodes.get('fuel_tbl').innerHTML)&&/2.?500 RPM/.test(nodes.get('fuel_tbl').innerHTML)&&/Rodaje \+ despegue/.test(nodes.get('fuel_tbl').innerHTML),'tabla de fases');
-// viento de frente de 20 kt: velocidad suelo 94
-set('r_wind',20);run('recalc()');near(run('fuelNeeded'),1.4+2.2+(120-13)/94*9.0+4.5,1e-9,'viento de frente');set('r_wind',0);
-// +20 °C sobre ISA: columna ISA+20 del POH (113 kt, 8,5 gal/h; 6000 ft 2500 RPM = 60 % · 112 kt · 8,5) y ascenso +20 %
-set('r_isa',20);run('recalc()');
-{const tas=112,gph=8.5,cm=13*1.2;near(run('fuelNeeded'),1.4+2.2*1.2+(120-cm)/tas*gph+0.5*gph,1e-9,'ISA+20');}
-set('r_isa',0);
-// con poco combustible cargado: avisa cuánto falta; sigue pudiéndose cargar lo necesario
-set('f_gal',10);run('recalc()');assert(/no alcanza/.test(nodes.get('fuel_msg').innerHTML)&&/faltan/.test(nodes.get('fuel_msg').innerHTML));assert.equal(run('SUM.fuel.have<SUM.fuel.need'),true);assert.equal(nodes.get('fuel_apply').disabled,false);
-// ruta más larga que el tanque: no llegas sin escala, botón deshabilitado
-set('f_gal',40);set('r_dist',900);run('recalc()');assert(/No llegas sin escala/.test(nodes.get('fuel_msg').innerHTML));assert.equal(nodes.get('fuel_apply').disabled,true);
-set('r_dist',120);
-// fuera de la tabla del POH: mensaje claro, resumen en error y sin tabla de números inventados
-set('r_alt',1500);run('recalc()');assert(run('SUM.fuel.err'));assert(/2\.?000/.test(nodes.get('fuel_msg').innerHTML));assert.equal(nodes.get('fuel_tbl').innerHTML,'');assert.equal(nodes.get('fuel_apply').disabled,true);assert.equal(run('PLAN'),null);
-set('r_alt',6000);set('r_rpm',3000);run('recalc()');assert(run('SUM.fuel.err')&&/RPM/.test(nodes.get('fuel_msg').innerHTML));set('r_rpm',2500);
-// modo manual: valores propios; los campos del POH ocultos no se validan
-set('r_mode','man');set('r_wind',200);run('recalc()');assert.equal(run('validateInputs()'),false,'manual: viento mayor que la TAS');set('r_wind',0);
-set('r_tas',105);set('r_burn',8.5);set('r_climb',1.5);set('r_alt','');set('r_rpm','');run('recalc()');
-assert.equal(run('validateInputs()'),true,'manual: los campos del POH ocultos no invalidan');
-near(run('fuelNeeded'),1.4+1.5+120/105*8.5+4.25,1e-9,'manual: TAS y consumo propios');
-set('r_mode','poh');set('r_alt',6000);set('r_rpm',2500);run('recalc()');assert.equal(run('validateInputs()'),true);assert(!run('SUM.fuel.err'));
-
 // ---------------------------------------------------------------- la RPM por defecto sale de las tablas (≈65 % a 6.000 ft)
 for(const [id,m] of Object.entries(MODELS)){const rpm=JSON.parse(run('(()=>{const keep=MODEL;MODEL=MODELS.'+id+';try{return defaultRpm(MODEL)}finally{MODEL=keep}})()'));const a=m.cruise.alts.find(x=>x.pa===6000);const row=a.rows.find(r=>r[0]===rpm);assert(row&&row[2][0]>=60&&row[2][0]<=70,id+' RPM por defecto '+rpm+' => '+(row&&row[2][0])+' %');}
 
 // ---------------------------------------------------------------- cambio de modelo
-set('to_w',2400);run('recalc()');
+ROUTE.pts=[SCTB,SCRG,SCSE];WIND.fn=()=>null;
+set('f_gal',29);run('recalc()');
 pick('c172m');
 assert.equal(run('MODEL.id'),'c172m');assert.equal(nodes.get('fl_model').value,'c172m');
 assert.equal(run('LIM.mtow'),2300);assert.equal(run('LIM.fuelMax'),38,'tanque estándar del 172M');
-assert.equal(nodes.get('w_empty').value,'1381');assert.equal(nodes.get('a_empty').value,'38.67');
-assert.equal(nodes.get('to_w').value,'2160');assert.equal(nodes.get('ld_w').value,'1980');assert.equal(nodes.get('f_gal').value,'29');
+assert.equal(nodes.get('w_empty').value,'1381');assert.equal(nodes.get('a_empty').value,'38.67');assert.equal(nodes.get('f_gal').value,'29');
 assert.equal(nodes.get('tank_row').hidden,false,'el 172M tiene dos tanques');
 assert(/Largo alcance/.test(nodes.get('m_tank').innerHTML));
 assert.equal(run('validateInputs()'),true);assert.equal(run('SUM.wb.ok'),true,'carga por defecto del 172M dentro de límites');
-assert(/Cessna 172M/.test(nodes.get('model_specs').textContent));
-assert(/Ejemplo|POH/.test(nodes.get('empty_note').textContent));
+assert(/Cessna 172M/.test(text('model_specs')));
+assert(/Ejemplo|POH/.test(text('empty_note')));
 // tanque de largo alcance y vuelta a estándar con combustible de más: se recorta a la capacidad
 set('m_tank','lr');nodes.get('m_tank').events.change();assert.equal(run('LIM.fuelMax'),48);
 set('f_gal',45);run('recalc()');assert.equal(run('SUM.wb.ok'),true);
 set('m_tank','std');nodes.get('m_tank').events.change();assert.equal(run('LIM.fuelMax'),38);assert.equal(+nodes.get('f_gal').value,38,'recorta al nuevo tanque');
-// cada modelo: valores por defecto válidos, dentro de límites y sin NaN
+// cada modelo: valores por defecto válidos, dentro de límites, sin NaN y con la ruta calculada con sus propias tablas
 for(const id of ['c172r','c172p','c172n','c172s','c172m']){
   pick(id);
   assert.equal(run('MODEL.id'),id);assert.equal(run('validateInputs()'),true,id+' válido');
   assert.equal(run('SUM.wb.ok'),true,id+' carga por defecto dentro de límites: '+JSON.stringify(run('SUM.wb')));
-  assert(run('SUM.to.ok')==='ok'||run('SUM.to.ok')==='warn'||run('SUM.to.ok')==='bad');assert(!run('SUM.to.out')&&!run('SUM.ld.out'),id+' con datos del POH a nivel del mar');
+  assert(['ok','warn','bad'].includes(run('SUM.to.ok')));assert(!run('SUM.to.out')&&!run('SUM.ld.out'),id+' con datos del POH a nivel del mar');
   const M=MODELS[id];assert.equal(nodes.get('tank_row').hidden,M.tanks.length<2);
   assert.equal(+nodes.get('w_empty').value,M.empty.w);assert.equal(+nodes.get('a_empty').value,M.empty.arm);
-  for(const v of ['spd_view','lim_view','tab_view','model_list','chart','to_out','ld_out','to_fig','ld_fig','wb_res','fuel_msg','fuel_tbl','fuel_out'])assert(nodes.get(v).innerHTML.length>0&&!/NaN|Infinity|undefined|null/.test(nodes.get(v).innerHTML),id+' '+v+' sin NaN/undefined');
+  for(const v of ['spd_view','lim_view','tab_view','chart','to_out','ld_out','to_fig','ld_fig','wb_res','fuel_verdict','fuel_tbl','fuel_out'])assert(nodes.get(v).innerHTML.length>0&&!/NaN|Infinity|undefined|null/.test(nodes.get(v).innerHTML),id+' '+v+' sin NaN/undefined');
   assert.equal((nodes.get('tab_view').innerHTML.match(/<table class="ptab">/g)||[]).length,M.perf.to.sheets.length+M.perf.ld.sheets.length+M.cruise.alts.length+1,id+' una tabla por hoja del POH, por altitud de crucero y la de ascenso');
-  assert(run('SUM.fuel.need')>0&&!run('SUM.fuel.err'),id+' planificador de ruta con datos del POH: '+JSON.stringify(run('SUM.fuel')));
+  const T=run('TRIP');assert(!T.err&&T.total>0&&T.pl.nm>290,id+' ruta con las tablas del POH: '+JSON.stringify(T.err));
   assert.equal(+nodes.get('r_taxi').value,M.climb.allow,id+' rodaje y despegue = valor del POH');
   assert(nodes.get('tab_view').innerHTML.includes(M.perf.to.fuente)&&nodes.get('tab_view').innerHTML.includes(M.perf.ld.fuente),id+' cita la figura del POH');
-  assert((nodes.get('model_list').innerHTML.match(/data-model=/g)||[]).length===5,'cinco modelos en la lista');
-  assert(new RegExp('data-model="'+id+'"').test(nodes.get('model_list').innerHTML.match(/<button[^>]*class="model on"[^>]*>/)?.[0]||''),id+' marcado como activo');
+  assert.equal(nodes.get('fl_model').value,id);
 }
 // en kg y litros con otro modelo (R: un solo tanque, una sola hoja de despegue)
 pick('c172r');set('u_w','kg');set('u_f','L');run('onUnitChange()');
-assert.equal(run('validateInputs()'),true);assert.equal(run('SUM.to.out'),undefined);assert(/solo para/.test(nodes.get('to_notes').innerHTML));
-set('to_w',+(2450*0.45359237).toFixed(1));set('elev',0);set('qnh',1013.25);set('oat',0);run('recalc()');
+assert.equal(run('validateInputs()'),true);assert.equal(run('SUM.to.out'),undefined);
+ROUTE.pts=[];set('elev',0);set('qnh',1013.25);set('oat',0);set('to_surf',1);set('wspd',0);towTo(2450*0.45359237);
+assert(/solo para/.test(nodes.get('to_notes').innerHTML));
 near(run('SUM.to.need'),1.25*MODELS.c172r.perf.to.sheets[0].rows[0][1],0.5,'kg => lb sin deriva, 172R S.L. 0 °C');
-reset();
-// elegir de nuevo el modelo activo no pierde datos
-set('w_empty',1700);pick('c172r');assert.equal(nodes.get('w_empty').value,'1700');
-// Salidas finitas
-for (const id of ['chart','to_fig','ld_fig','to_out','ld_out','fuel_out','fuel_msg','fuel_tbl','wb_res','spd_view','lim_view','tab_view']) assert(!/NaN|Infinity|undefined/.test(nodes.get(id).innerHTML), id + ' sin NaN');
+set('u_w','lb');set('u_f','gal');run('onUnitChange()');
+// salidas finitas
+for(const id of ['chart','to_fig','ld_fig','to_out','ld_out','fuel_out','fuel_verdict','fuel_tbl','wb_res','spd_view','lim_view','tab_view'])assert(!/NaN|Infinity|undefined/.test(nodes.get(id).innerHTML),id+' sin NaN');
+
+
+// ---------------------------------------------------------------- bitácora (PVO): números coherentes con el cálculo y con el viento de cada tramo
+{
+  pick('c172s');ROUTE.pts=[SCTB,SCRG,SCSE];g.AD=null;
+  set('r_mode','poh');set('r_alt',6000);set('r_rpm',2500);set('r_isa',0);set('r_extra',0);set('r_res',30);set('r_taxi',1.4);set('elev',0);set('qnh',1013.25);set('ru_var',0.9);
+  g.VIAJE.etdMs=()=>Date.UTC(2026,10,26,21,0);g.VIAJE.provenance=()=>'2 tramos con pronóstico de modelo de Open-Meteo.com (obtenido 20:26)';
+  WIND.fn=(p,q)=>q===SCRG?{dir:148,spd:2}:{dir:24,spd:3};
+  load('pvo.js');
+  set('f_gal',40);run('recalc()');nodes.get('fuel_apply').events.click();
+  const S=g.PVO.build(),T=run('TRIP');
+  assert(S,'con ruta y datos completos hay bitácora');
+  assert.equal(S.rows.length,3,'rodaje + 2 tramos');assert.equal(S.cols.length,S.rows[1].cells.length);assert.equal(S.cols.length,S.foot.length);
+  const [r0,r1,r2]=S.rows;
+  assert.equal(r1.cells[0],'1. SCTB → SCRG');assert.equal(r2.cells[0],'2. SCRG → SCSE');
+  assert.equal(r1.cells[2],'148°/2');assert.equal(r2.cells[2],'024°/3','el viento de cada tramo aparece en su fila');
+  const pad=n=>String(Math.round(n)%360).padStart(3,'0');
+  T.pl.legs.forEach((l,i)=>{const c=S.rows[i+1].cells;assert.equal(c[1],pad(l.tc)+'°');assert.equal(c[4],pad(l.th)+'°');assert.equal(c[5],pad(l.mh)+'°');near(((l.th-l.mh)+540)%360-180,0.9,1e-6,'rumbo magnético = verdadero − declinación E')});
+  assert.equal(S.foot[6],String(Math.round(T.pl.nm)),'distancia total');
+  assert(/^4,[56] gal$/.test(r2.cells[12]),'al final del último tramo queda la reserva: '+r2.cells[12]);
+  assert.equal(r0.cells[12],g.APP.dF(T.have-1.4),'tras el rodaje queda lo cargado menos 1,4 gal: '+r0.cells[12]);
+  const fuelBox=S.boxes.find(b=>b[0]==='Combustible')[1];assert(fuelBox.some(([k,v])=>/Necesario total/.test(k)&&/✔ alcanza/.test(v)));
+  assert(S.head.some(([k,v])=>k==='Viento'&&/Open-Meteo/.test(v)));assert(S.notes.some(n=>/Open-Meteo\.com \(CC BY 4\.0\)/.test(n)),'atribución de Open-Meteo');
+  assert(S.notes.some(n=>/no sustituye al POH/.test(n)));
+  const txt=g.PVO.asText(S);assert(/BITÁCORA DE NAVEGACIÓN/.test(txt)&&/1\. SCTB → SCRG/.test(txt)&&!/NaN|undefined/.test(txt));
+  // con poco combustible la bitácora lo dice
+  set('f_gal',20);run('recalc()');assert(g.PVO.build().boxes.find(b=>b[0]==='Combustible')[1].some(([k,v])=>/⚠ NO ALCANZA/.test(v)));
+  // sin ruta, o con error de cálculo, no hay bitácora
+  ROUTE.pts=[];run('recalc()');assert.equal(g.PVO.build(),null);
+  ROUTE.pts=[SCTB,SCRG,SCSE];set('f_gal',40);WIND.fn=()=>({dir:285,spd:200});run('recalc()');assert.equal(g.PVO.build(),null,'viento imposible: sin bitácora');
+  WIND.fn=()=>null;run('recalc()');
+}
+
 
 // ---------------------------------------------------------------- base de aeródromos: datos y buscador
 const AD=JSON.parse(fs.readFileSync(__dirname+'/data/aerodromos.json','utf8'));
@@ -319,7 +449,7 @@ const AD=JSON.parse(fs.readFileSync(__dirname+'/data/aerodromos.json','utf8'));
 (async()=>{
   // buscador y lista de aeródromos (aerodromos.js con un DOM mínimo)
   const stub=()=>{const o=new Proxy(function(){},{get:(t,k)=>k==='value'||k==='textContent'||k==='className'?(t[k]??''):k==='hidden'?(t[k]??false):k==='classList'?{toggle(){}}:k==='dataset'?{}:k==='closest'?()=>o:k==='options'?[]:k==='scrollTop'?0:(...a)=>o,set:(t,k,v)=>{t[k]=v;return true},apply:()=>o});return o;};
-  const nodesAD=new Map();const doc={getElementById:id=>{if(!nodesAD.has(id))nodesAD.set(id,stub());return nodesAD.get(id)},createElement:()=>stub(),createTextNode:()=>stub()};
+  const nodesAD=new Map();const doc={getElementById:id=>{if(!nodesAD.has(id))nodesAD.set(id,stub());return nodesAD.get(id)},createElement:()=>stub(),createTextNode:()=>stub(),addEventListener(){},querySelectorAll:()=>[],body:{dataset:{}}};
   const w={AD_DATA:AD};const c2=vm.createContext({document:doc,window:w,console,fetch:undefined,setTimeout});
   vm.runInContext(fs.readFileSync(__dirname+'/aerodromos.js','utf8'),c2);await new Promise(r=>setTimeout(r,20));
   const A=w.AD;assert(A&&typeof A.get==='function'&&typeof A.searchAll==='function'&&typeof A.browse==='function','API de aeródromos');
@@ -339,5 +469,5 @@ const AD=JSON.parse(fs.readFileSync(__dirname+'/data/aerodromos.json','utf8'));
   // la ruta usa coordenadas completas
   const rt=A.route(A.get('SCTB'),A.get('SCVI'));assert(rt&&rt.nm>330&&rt.nm<400,'ruta SCTB → SCVI');
   assert.equal(A.route(A.get('SCTB'),{lat:null,lon:-70}),null,'sin coordenadas no hay ruta (la app lo avisa en vez de usar una distancia vieja)');
-  console.log('PASS: integridad de las 5 tablas POH (M, N, P, R, S), valores exactos e interpolación contra el POH, viento/hierba/sobrepeso, fuera de tabla, cambio de modelo y tanques, kg/L, validaciones y salidas finitas, margen seleccionable, crucero/ascenso del POH (celdas exactas, interpolación, fuera de tabla), planificador de ruta, datos y buscador de aeródromos.');
+  console.log('PASS: integridad de las 5 tablas POH (M, N, P, R, S), valores exactos e interpolación contra el POH, viento/hierba/sobrepeso, fuera de tabla, cambio de modelo y tanques, kg/L, validaciones y salidas finitas, margen seleccionable, crucero/ascenso del POH (celdas exactas, interpolación, fuera de tabla), combustible por tramos con viento (veredicto, alterno, tanque, modo manual), bitácora PVO, datos y buscador de aeródromos.');
 })();

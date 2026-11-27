@@ -47,22 +47,26 @@
   }
 
   // ---------- plan de combustible por tramos ----------
-  // o = { tas, gph, climb:{min,gal,nm}, taxi (gal), resMin, wdir, wspd, vari (° E positivo, W negativo) }
+  // o = { tas, gph, climb:{min,gal,nm}, taxi (gal), resMin, wdir, wspd, vari (° E positivo, W negativo),
+  //       winds?: [{dir, spd}] un viento por tramo (si falta el del tramo, valen wdir/wspd) }
   // El ascenso cubre los primeros climb.nm de la ruta (a la velocidad suelo del tramo); el resto es crucero.
+  // Cada tramo trae además el tiempo y el combustible acumulados (minCum, galCum: sin rodaje ni reserva) para la bitácora.
   function plan(pts, o) {
     const legs = legsOf(pts), cl = o.climb || { min: 0, gal: 0, nm: 0 };
     const res = { legs: [], nm: 0, min: 0, galClimb: 0, galCruise: 0, warns: [], ok: true };
     let climbLeft = cl.nm;
-    for (const L of legs) {
-      const w = windTriangle(L.tc, o.tas, o.wdir || 0, o.wspd || 0);
-      if (!w) { res.ok = false; res.legs.push({ ...L, th: null, mh: null, gs: null, min: null, gal: null, noWind: true }); continue; }
+    legs.forEach((L, k) => {
+      const wi = (o.winds && o.winds[k]) || { dir: o.wdir || 0, spd: o.wspd || 0 }, wdir = wi.dir || 0, wspd = wi.spd || 0;
+      const w = windTriangle(L.tc, o.tas, wdir, wspd);
+      if (!w) { res.ok = false; res.legs.push({ ...L, th: null, mh: null, gs: null, min: null, gal: null, wdir, wspd, noWind: true }); return; }
       const cNm = Math.min(L.nm, Math.max(0, climbLeft)), kNm = L.nm - cNm;
       const frac = cl.nm > 0 ? cNm / cl.nm : 0;
-      const cMin = cl.min * frac, cGal = cl.gal * frac, kMin = kNm / w.gs * 60, kGal = kMin / 60 * o.gph;
+      // sin distancia de ascenso (valores propios del piloto) el combustible de ascenso es un extra que se suma una vez, en el primer tramo
+      const cMin = cl.min * frac, cGal = cl.gal * frac + (k === 0 && !(cl.nm > 0) ? (cl.gal || 0) : 0), kMin = kNm / w.gs * 60, kGal = kMin / 60 * o.gph;
       climbLeft -= cNm;
-      res.legs.push({ ...L, th: w.th, mh: mod360(w.th - (o.vari || 0)), gs: w.gs, wca: w.wca, head: w.head, min: cMin + kMin, gal: cGal + kGal, climbNm: cNm, climbMin: cMin, climbGal: cGal });
       res.nm += L.nm; res.min += cMin + kMin; res.galClimb += cGal; res.galCruise += kGal;
-    }
+      res.legs.push({ ...L, th: w.th, mh: mod360(w.th - (o.vari || 0)), gs: w.gs, wca: w.wca, head: w.head, wdir, wspd, min: cMin + kMin, gal: cGal + kGal, climbNm: cNm, climbMin: cMin, climbGal: cGal, minCum: res.min, galCum: res.galClimb + res.galCruise });
+    });
     if (legs.length && climbLeft > 1e-6) res.warns.push(`La ruta (${res.nm.toFixed(0)} NM) es más corta que el ascenso hasta la altitud de crucero (${cl.nm.toFixed(0)} NM): el combustible está sobreestimado; baja la altitud de crucero.`);
     res.galReserve = (o.resMin || 0) / 60 * o.gph;
     res.galTaxi = o.taxi || 0;
